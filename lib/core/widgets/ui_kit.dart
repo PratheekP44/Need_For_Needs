@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
+import '../utils/money_format.dart';
 
 class SectionHeader extends StatelessWidget {
   const SectionHeader({
@@ -40,12 +41,16 @@ class AppSearchField extends StatelessWidget {
     super.key,
     this.hint = 'Search campus essentials',
     this.onTap,
+    this.onChanged,
+    this.onFilterPressed,
     this.readOnly = false,
     this.controller,
   });
 
   final String hint;
   final VoidCallback? onTap;
+  final ValueChanged<String>? onChanged;
+  final VoidCallback? onFilterPressed;
   final bool readOnly;
   final TextEditingController? controller;
 
@@ -55,10 +60,19 @@ class AppSearchField extends StatelessWidget {
       controller: controller,
       readOnly: readOnly,
       onTap: onTap,
+      onChanged: onChanged,
+      textInputAction: TextInputAction.search,
       decoration: InputDecoration(
         hintText: hint,
         prefixIcon: const Icon(Icons.search_rounded, color: AppColors.muted),
-        suffixIcon: const Icon(Icons.tune_rounded, color: AppColors.muted),
+        suffixIcon: IconButton(
+          tooltip: 'Filters',
+          onPressed: onFilterPressed,
+          icon: Icon(
+            Icons.tune_rounded,
+            color: onFilterPressed == null ? AppColors.muted.withValues(alpha: 0.5) : AppColors.muted,
+          ),
+        ),
       ),
     );
   }
@@ -71,29 +85,38 @@ class PrimaryButton extends StatelessWidget {
     required this.onPressed,
     this.icon,
     this.expanded = true,
+    this.isLoading = false,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
   final bool expanded;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
-    final child = icon == null
-        ? Text(label)
-        : Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 20),
-              const SizedBox(width: 8),
-              Text(label),
-            ],
-          );
+    final enabled = onPressed != null && !isLoading;
+    final child = isLoading
+        ? const SizedBox(
+            height: 20,
+            width: 20,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+          )
+        : icon == null
+            ? Text(label)
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 20),
+                  const SizedBox(width: 8),
+                  Text(label),
+                ],
+              );
 
     final button = FilledButton(
-      onPressed: onPressed,
+      onPressed: enabled ? onPressed : null,
       child: child,
     );
 
@@ -220,7 +243,7 @@ class PriceText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(
-      '\$${amount.toStringAsFixed(2)}',
+      MoneyFormat.format(amount),
       style: style ??
           AppTextStyles.title.copyWith(
             color: AppColors.primary,

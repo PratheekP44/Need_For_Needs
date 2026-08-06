@@ -37,7 +37,19 @@ dependencies:
   flutter_riverpod: ^3.4.2
   go_router: ^17.3.0
   google_fonts: ^8.2.1
-
+  flutter_blue_plus: ^2.3.11
+  permission_handler: ^12.0.3
+  virtual_mcu:
+    path: virtual_mcu
+  http: ^1.6.0
+  http_parser: ^4.1.2
+  flutter_secure_storage: ^10.3.1
+  geolocator: ^14.0.3
+  razorpay_flutter: ^1.4.5
+  intl: ^0.20.3
+  crypto: ^3.0.7
+  image_picker: ^1.2.3
+  cached_network_image: ^3.4.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

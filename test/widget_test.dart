@@ -15,6 +15,6 @@ void main() {
     expect(find.textContaining('Campus Essentials'), findsOneWidget);
 
     // Allow splash auto-navigation timer without settling forever.
-    await tester.pump(const Duration(milliseconds: 1700));
+    await tester.pump(const Duration(milliseconds: 2300));
   });
 }

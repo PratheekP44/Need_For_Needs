@@ -1,0 +1,233 @@
+{
+  "info": {
+    "_postman_id": "campus-essentials-locker-box-phase6",
+    "name": "Campus Essentials - Locker & Box",
+    "description": "Phase 6 Locker and Box Management APIs. Requires a valid JWT. Admin token needed for write operations.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "accessToken", "value": "" },
+    { "key": "adminAccessToken", "value": "" },
+    { "key": "lockerMongoId", "value": "" },
+    { "key": "lockerId", "value": "NQ-01" },
+    { "key": "boxMongoId", "value": "" },
+    { "key": "boxId", "value": "NQ-01-B01" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Signup Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.accessToken) {",
+                  "  pm.collectionVariables.set('adminAccessToken', json.data.accessToken);",
+                  "  pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Locker Admin\",\n  \"email\": \"locker.admin@campus.edu\",\n  \"phone\": \"+919800011122\",\n  \"password\": \"Password1\",\n  \"accountType\": \"admin\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/signup"
+          }
+        },
+        {
+          "name": "Signup User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Campus User\",\n  \"email\": \"locker.user@campus.edu\",\n  \"phone\": \"+919800033344\",\n  \"password\": \"Password1\",\n  \"accountType\": \"user\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/signup"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Lockers",
+      "item": [
+        {
+          "name": "Create Locker (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.locker) {",
+                  "  pm.collectionVariables.set('lockerMongoId', json.data.locker.id);",
+                  "  pm.collectionVariables.set('lockerId', json.data.locker.lockerId);",
+                  "  if (json.data.locker.boxes && json.data.locker.boxes[0]) {",
+                  "    pm.collectionVariables.set('boxMongoId', json.data.locker.boxes[0].id);",
+                  "    pm.collectionVariables.set('boxId', json.data.locker.boxes[0].boxId);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lockerId\": \"NQ-01\",\n  \"lockerName\": \"North Quad Hub\",\n  \"latitude\": 12.9716,\n  \"longitude\": 77.5946,\n  \"status\": \"ACTIVE\",\n  \"totalBoxes\": 4,\n  \"description\": \"Main campus locker near North Quad\"\n}"
+            },
+            "url": "{{baseUrl}}/lockers"
+          }
+        },
+        {
+          "name": "List Lockers",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": "{{baseUrl}}/lockers?page=1&limit=20&status=ACTIVE&search=North&sort=-createdAt"
+          }
+        },
+        {
+          "name": "Get Locker By ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": "{{baseUrl}}/lockers/{{lockerMongoId}}"
+          }
+        },
+        {
+          "name": "Get Locker By lockerId",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": "{{baseUrl}}/lockers/{{lockerId}}"
+          }
+        },
+        {
+          "name": "Update Locker (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lockerName\": \"North Quad Hub - Updated\",\n  \"status\": \"ACTIVE\",\n  \"description\": \"Updated description\",\n  \"totalBoxes\": 5\n}"
+            },
+            "url": "{{baseUrl}}/lockers/{{lockerMongoId}}"
+          }
+        },
+        {
+          "name": "Delete Locker (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "url": "{{baseUrl}}/lockers/{{lockerMongoId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Boxes",
+      "item": [
+        {
+          "name": "List Boxes",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": "{{baseUrl}}/boxes?page=1&limit=20&status=EMPTY&doorState=CLOSED&sort=boxNumber"
+          }
+        },
+        {
+          "name": "List Boxes By Locker",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": "{{baseUrl}}/boxes?locker={{lockerMongoId}}&sort=boxNumber"
+          }
+        },
+        {
+          "name": "Get Box By ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": "{{baseUrl}}/boxes/{{boxMongoId}}"
+          }
+        },
+        {
+          "name": "Update Box Status (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"AVAILABLE\",\n  \"isEmpty\": false\n}"
+            },
+            "url": "{{baseUrl}}/boxes/{{boxMongoId}}"
+          }
+        },
+        {
+          "name": "Update Door State (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doorState\": \"OPEN\"\n}"
+            },
+            "url": "{{baseUrl}}/boxes/{{boxMongoId}}"
+          }
+        }
+      ]
+    }
+  ]
+}

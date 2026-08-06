@@ -1,0 +1,274 @@
+{
+  "info": {
+    "_postman_id": "campus-essentials-items-stock-phase7",
+    "name": "Campus Essentials - Items & Stock",
+    "description": "Phase 7 Product Catalog + Stock Management APIs.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "adminAccessToken", "value": "" },
+    { "key": "userAccessToken", "value": "" },
+    { "key": "lockerId", "value": "" },
+    { "key": "boxId", "value": "" },
+    { "key": "boxId2", "value": "" },
+    { "key": "itemId", "value": "" },
+    { "key": "itemMongoId", "value": "" },
+    { "key": "stockId", "value": "" },
+    { "key": "stockMongoId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Signup Admin",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const j=pm.response.json();",
+                "if(j.data&&j.data.accessToken) pm.collectionVariables.set('adminAccessToken', j.data.accessToken);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Inventory Admin\",\n  \"email\": \"inventory.admin@campus.edu\",\n  \"phone\": \"+919700011122\",\n  \"password\": \"Password1\",\n  \"accountType\": \"admin\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/signup"
+          }
+        },
+        {
+          "name": "Signup User",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const j=pm.response.json();",
+                "if(j.data&&j.data.accessToken) pm.collectionVariables.set('userAccessToken', j.data.accessToken);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Inventory User\",\n  \"email\": \"inventory.user@campus.edu\",\n  \"phone\": \"+919700033344\",\n  \"password\": \"Password1\",\n  \"accountType\": \"user\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/signup"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Setup Locker",
+      "item": [
+        {
+          "name": "Create Locker with Boxes",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const j=pm.response.json();",
+                "if(j.data&&j.data.locker){",
+                "  pm.collectionVariables.set('lockerId', j.data.locker.id);",
+                "  if(j.data.locker.boxes[0]) pm.collectionVariables.set('boxId', j.data.locker.boxes[0].id);",
+                "  if(j.data.locker.boxes[1]) pm.collectionVariables.set('boxId2', j.data.locker.boxes[1].id);",
+                "}"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lockerId\": \"INV-01\",\n  \"lockerName\": \"Inventory Test Locker\",\n  \"latitude\": 12.97,\n  \"longitude\": 77.59,\n  \"status\": \"ACTIVE\",\n  \"totalBoxes\": 3,\n  \"description\": \"Phase 7 test locker\"\n}"
+            },
+            "url": "{{baseUrl}}/lockers"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Items",
+      "item": [
+        {
+          "name": "Create Item",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const j=pm.response.json();",
+                "if(j.data&&j.data.item){",
+                "  pm.collectionVariables.set('itemMongoId', j.data.item.id);",
+                "  pm.collectionVariables.set('itemId', j.data.item.itemId);",
+                "}"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itemId\": \"ITM-PROTEIN-01\",\n  \"name\": \"Protein Bar\",\n  \"description\": \"High protein campus snack\",\n  \"category\": \"FOOD\",\n  \"brand\": \"CampusFuel\",\n  \"barcode\": \"8901001001001\",\n  \"imageUrl\": \"https://example.com/protein.png\",\n  \"sellingPrice\": 49.0,\n  \"costPrice\": 30.0,\n  \"gstPercentage\": 5,\n  \"unit\": \"piece\",\n  \"tags\": [\"snack\", \"protein\"]\n}"
+            },
+            "url": "{{baseUrl}}/items"
+          }
+        },
+        {
+          "name": "List Items",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/items?page=1&limit=20&category=FOOD&search=Protein&sort=price"
+          }
+        },
+        {
+          "name": "Get Item",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/items/{{itemMongoId}}"
+          }
+        },
+        {
+          "name": "Update Item",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sellingPrice\": 55,\n  \"tags\": [\"snack\", \"protein\", \"popular\"]\n}"
+            },
+            "url": "{{baseUrl}}/items/{{itemMongoId}}"
+          }
+        },
+        {
+          "name": "Delete Item",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }],
+            "url": "{{baseUrl}}/items/{{itemMongoId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stock",
+      "item": [
+        {
+          "name": "Assign Item to Box (Create Stock)",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const j=pm.response.json();",
+                "if(j.data&&j.data.stock){",
+                "  pm.collectionVariables.set('stockMongoId', j.data.stock.id);",
+                "  pm.collectionVariables.set('stockId', j.data.stock.stockId);",
+                "}"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stockId\": \"STK-001\",\n  \"box\": \"{{boxId}}\",\n  \"item\": \"{{itemMongoId}}\",\n  \"currentQuantity\": 8,\n  \"maximumQuantity\": 20,\n  \"reorderLevel\": 5,\n  \"supplierName\": \"Campus Supplies\",\n  \"batchNumber\": \"BATCH-A1\"\n}"
+            },
+            "url": "{{baseUrl}}/stock"
+          }
+        },
+        {
+          "name": "List Stock",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/stock?page=1&limit=20&status=IN_STOCK&availability=available&sort=-quantity"
+          }
+        },
+        {
+          "name": "Get Stock",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/stock/{{stockMongoId}}"
+          }
+        },
+        {
+          "name": "Restock",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"addQuantity\": 5,\n  \"batchNumber\": \"BATCH-A2\"\n}"
+            },
+            "url": "{{baseUrl}}/stock/{{stockMongoId}}/restock"
+          }
+        },
+        {
+          "name": "Move Stock",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toBox\": \"{{boxId2}}\"\n}"
+            },
+            "url": "{{baseUrl}}/stock/{{stockMongoId}}/move"
+          }
+        },
+        {
+          "name": "Update Stock",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentQuantity\": 3,\n  \"reorderLevel\": 5\n}"
+            },
+            "url": "{{baseUrl}}/stock/{{stockMongoId}}"
+          }
+        },
+        {
+          "name": "Remove Stock from Box",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }],
+            "url": "{{baseUrl}}/stock/{{stockMongoId}}"
+          }
+        }
+      ]
+    }
+  ]
+}

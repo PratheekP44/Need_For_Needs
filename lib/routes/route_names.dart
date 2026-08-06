@@ -19,6 +19,7 @@ class RouteNames {
   static const String collectItem = 'collectItem';
   static const String settings = 'settings';
   static const String help = 'help';
+  static const String developerDashboard = 'developerDashboard';
 
   static const String adminLogin = 'adminLogin';
   static const String adminDashboard = 'adminDashboard';
@@ -26,5 +27,9 @@ class RouteNames {
   static const String adminInventory = 'adminInventory';
   static const String adminInventoryAdd = 'adminInventoryAdd';
   static const String adminInventoryEdit = 'adminInventoryEdit';
+  static const String adminInventoryAssign = 'adminInventoryAssign';
   static const String adminOrders = 'adminOrders';
+  static const String adminVirtualMcu = 'adminVirtualMcu';
+  static const String adminBleDebug = 'adminBleDebug';
+  static const String bleDebug = 'bleDebug';
 }

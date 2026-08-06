@@ -2,146 +2,370 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/data/fake_data.dart';
+import '../../../core/data/models.dart';
+import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/widgets/product_card.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
+import '../../../core/widgets/ux.dart';
+import '../../cart/viewmodels/cart_viewmodel.dart';
 import '../viewmodels/home_viewmodel.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    ref.watch(homeViewModelProvider);
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  final _search = TextEditingController();
+  String _query = '';
+  String? _selectedCategoryId;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  String _greeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  List<Product> _filterProducts(List<Product> products) {
+    var list = products;
+    if (_selectedCategoryId != null) {
+      final selected = _selectedCategoryId!.toUpperCase();
+      list = list
+          .where((p) => p.categoryId.toUpperCase() == selected)
+          .toList();
+    }
+    final q = _query.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      list = list
+          .where(
+            (p) =>
+                p.name.toLowerCase().contains(q) ||
+                p.description.toLowerCase().contains(q) ||
+                p.categoryId.toLowerCase().contains(q) ||
+                p.lockerName.toLowerCase().contains(q),
+          )
+          .toList();
+    }
+    return list;
+  }
+
+  void _openFilters(List<ProductCategory> categories) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Filter by category', style: AppTextStyles.title),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('All'),
+                      selected: _selectedCategoryId == null,
+                      onSelected: (_) {
+                        setState(() => _selectedCategoryId = null);
+                        Navigator.pop(context);
+                      },
+                    ),
+                    ...categories.map(
+                      (c) => ChoiceChip(
+                        label: Text(c.name),
+                        selected: _selectedCategoryId == c.id,
+                        onSelected: (_) {
+                          setState(() => _selectedCategoryId = c.id);
+                          Navigator.pop(context);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final home = ref.watch(homeViewModelProvider);
+    final auth = ref.watch(authSessionProvider);
     final columns = responsiveColumns(context);
-    final firstName = FakeData.user.name.split(' ').first;
+    final firstName = (auth.user?.name ?? 'there').split(' ').first;
+    final lockers = home.lockers;
+    final categories = home.categories;
+    final filtered = _filterProducts(home.products);
+    final searching = _query.trim().isNotEmpty || _selectedCategoryId != null;
+    final popular =
+        searching ? filtered : _filterProducts(home.popular);
+    final recent = searching
+        ? filtered.take(8).toList()
+        : _filterProducts(home.recent.isNotEmpty ? home.recent : home.newest);
+    final recentTitle =
+        home.recent.isNotEmpty ? 'Buy again' : 'Recently added';
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: ResponsiveCenter(
           maxWidth: 900,
-          child: CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                  child: FadeSlideIn(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Good afternoon, $firstName', style: AppTextStyles.caption),
-                        const SizedBox(height: 4),
-                        Text('What do you need?', style: AppTextStyles.headline),
-                        const SizedBox(height: 16),
-                        const AppSearchField(),
-                        const SizedBox(height: 20),
-                        SectionHeader(
-                          title: 'Nearby locker',
-                          actionLabel: 'See all',
-                          onAction: () => context.push('/locker/${FakeData.lockers.first.id}'),
+          child: home.isLoading && home.products.isEmpty
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: () =>
+                      ref.read(homeViewModelProvider.notifier).refresh(),
+                  child: CustomScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                          child: FadeSlideIn(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${_greeting()}, $firstName',
+                                  style: AppTextStyles.caption,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'What do you need?',
+                                  style: AppTextStyles.headline,
+                                ),
+                                const SizedBox(height: 16),
+                                AppSearchField(
+                                  controller: _search,
+                                  onChanged: (value) =>
+                                      setState(() => _query = value),
+                                  onFilterPressed: categories.isEmpty
+                                      ? null
+                                      : () => _openFilters(categories),
+                                ),
+                                const SizedBox(height: 20),
+                                SectionHeader(
+                                  title: 'Nearby locker',
+                                  actionLabel: 'See all',
+                                  onAction: lockers.isEmpty
+                                      ? null
+                                      : () => context.push(
+                                            '/locker/${lockers.first.id}',
+                                          ),
+                                ),
+                                const SizedBox(height: 10),
+                                if (lockers.isNotEmpty)
+                                  LockerCard(locker: lockers.first)
+                                else
+                                  SoftPanel(
+                                    child: Text(
+                                      home.error ?? 'No lockers found nearby',
+                                      style: AppTextStyles.body.copyWith(
+                                        color: AppColors.muted,
+                                      ),
+                                    ),
+                                  ),
+                                const SizedBox(height: 24),
+                                const SectionHeader(title: 'Categories'),
+                                const SizedBox(height: 10),
+                              ],
+                            ),
+                          ),
                         ),
-                        const SizedBox(height: 10),
-                        LockerCard(locker: FakeData.lockers.first),
-                        const SizedBox(height: 24),
-                        const SectionHeader(title: 'Categories'),
-                        const SizedBox(height: 10),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 92,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    scrollDirection: Axis.horizontal,
-                    itemCount: FakeData.categories.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 10),
-                    itemBuilder: (context, index) {
-                      final category = FakeData.categories[index];
-                      return Container(
-                        width: 88,
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: AppColors.border),
+                      ),
+                      SliverToBoxAdapter(
+                        child: SizedBox(
+                          height: 92,
+                          child: categories.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    'No categories yet',
+                                    style: AppTextStyles.caption,
+                                  ),
+                                )
+                              : ListView.separated(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: categories.length,
+                                  separatorBuilder: (_, _) =>
+                                      const SizedBox(width: 10),
+                                  itemBuilder: (context, index) {
+                                    final category = categories[index];
+                                    final selected =
+                                        _selectedCategoryId == category.id;
+                                    return Material(
+                                      color: selected
+                                          ? AppColors.chip
+                                          : AppColors.surface,
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(16),
+                                        onTap: () {
+                                          setState(() {
+                                            _selectedCategoryId = selected
+                                                ? null
+                                                : category.id;
+                                          });
+                                        },
+                                        child: Ink(
+                                          width: 88,
+                                          decoration: BoxDecoration(
+                                            borderRadius:
+                                                BorderRadius.circular(16),
+                                            border: Border.all(
+                                              color: selected
+                                                  ? AppColors.primary
+                                                  : AppColors.border,
+                                            ),
+                                          ),
+                                          child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              Icon(
+                                                _categoryIcon(category.icon),
+                                                color: AppColors.primary,
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Text(
+                                                category.name,
+                                                style: AppTextStyles.caption,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
                         ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(_categoryIcon(category.icon), color: AppColors.primary),
-                            const SizedBox(height: 8),
-                            Text(category.name, style: AppTextStyles.caption),
-                          ],
+                      ),
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
+                          child: SectionHeader(
+                            title: _selectedCategoryId == null && _query.isEmpty
+                                ? 'Popular items'
+                                : 'Results',
+                            actionLabel: 'Browse',
+                            onAction: lockers.isEmpty
+                                ? null
+                                : () => context.push(
+                                      '/locker/${lockers.first.id}',
+                                    ),
+                          ),
                         ),
-                      );
-                    },
+                      ),
+                      SliverToBoxAdapter(
+                        child: SizedBox(
+                          height: 250,
+                          child: popular.isEmpty
+                              ? EmptyState(
+                                  message: _query.isNotEmpty ||
+                                          _selectedCategoryId != null
+                                      ? 'No items match your search'
+                                      : 'No products available',
+                                  icon: Icons.search_off_rounded,
+                                )
+                              : ListView.separated(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: popular.length,
+                                  separatorBuilder: (_, _) =>
+                                      const SizedBox(width: 12),
+                                  itemBuilder: (context, index) {
+                                    final product = popular[index];
+                                    return ProductCard(
+                                      product: product,
+                                      onTap: () => context.push(
+                                        '/product/${product.id}',
+                                      ),
+                                      onAddToCart: () => _addToCart(
+                                        context,
+                                        ref,
+                                        product,
+                                      ),
+                                    );
+                                  },
+                                ),
+                        ),
+                      ),
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
+                          child: Text(
+                            recentTitle,
+                            style: AppTextStyles.title,
+                          ),
+                        ),
+                      ),
+                      if (recent.isEmpty)
+                        const SliverToBoxAdapter(
+                          child: Padding(
+                            padding: EdgeInsets.fromLTRB(20, 0, 20, 100),
+                            child: EmptyState(
+                              message: 'No recent purchases yet',
+                              icon: Icons.history_rounded,
+                            ),
+                          ),
+                        )
+                      else
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                          sliver: SliverGrid(
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: columns,
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              childAspectRatio: 0.72,
+                            ),
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) {
+                                final product = recent[index];
+                                return ProductCard(
+                                  width: double.infinity,
+                                  product: product,
+                                  onTap: () =>
+                                      context.push('/product/${product.id}'),
+                                  onAddToCart: () => _addToCart(
+                                    context,
+                                    ref,
+                                    product,
+                                  ),
+                                );
+                              },
+                              childCount: recent.length,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
-                  child: SectionHeader(
-                    title: 'Popular items',
-                    actionLabel: 'Browse',
-                    onAction: () => context.push('/locker/l1'),
-                  ),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 250,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    scrollDirection: Axis.horizontal,
-                    itemCount: FakeData.popularProducts.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 12),
-                    itemBuilder: (context, index) {
-                      final product = FakeData.popularProducts[index];
-                      return ProductCard(
-                        product: product,
-                        onTap: () => context.push('/product/${product.id}'),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
-                  child: Text('Recently purchased', style: AppTextStyles.title),
-                ),
-              ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                sliver: SliverGrid(
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: columns,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 0.72,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      final product = FakeData.recentProducts[index];
-                      return ProductCard(
-                        width: double.infinity,
-                        product: product,
-                        onTap: () => context.push('/product/${product.id}'),
-                      );
-                    },
-                    childCount: FakeData.recentProducts.length,
-                  ),
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );
@@ -154,7 +378,25 @@ class HomeScreen extends ConsumerWidget {
       'edit' => Icons.edit_outlined,
       'soap' => Icons.clean_hands_outlined,
       'headphones' => Icons.headphones_outlined,
+      'inventory_2' => Icons.inventory_2_outlined,
       _ => Icons.category_outlined,
     };
+  }
+}
+
+Future<void> _addToCart(
+  BuildContext context,
+  WidgetRef ref,
+  Product product,
+) async {
+  try {
+    await ref.read(cartViewModelProvider.notifier).addStock(product);
+    if (context.mounted) {
+      showAppSnackBar(context, 'Added to cart');
+    }
+  } catch (e) {
+    if (context.mounted) {
+      showAppSnackBar(context, userFacingError(e));
+    }
   }
 }

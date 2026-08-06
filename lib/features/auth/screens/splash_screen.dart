@@ -1,23 +1,33 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/api/auth_debug.dart';
+import '../../../core/constants/route_constants.dart';
+import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
+import '../../../core/widgets/ux.dart';
 
-class SplashScreen extends StatefulWidget {
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashScreenState extends ConsumerState<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _fade;
   late final Animation<double> _scale;
+  int _logoPresses = 0;
+  Timer? _navTimer;
+  bool _unlockedDeveloper = false;
 
   @override
   void initState() {
@@ -31,13 +41,45 @@ class _SplashScreenState extends State<SplashScreen>
       CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
     );
     _controller.forward();
-    Future<void>.delayed(const Duration(milliseconds: 1600), () {
-      if (mounted) context.go('/login');
-    });
+    // Hold splash long enough for 5× logo long-press developer unlock.
+    _armSplashRelease();
+  }
+
+  void _armSplashRelease() {
+    _navTimer?.cancel();
+    _navTimer = Timer(const Duration(milliseconds: 6000), _releaseSplash);
+  }
+
+  void _releaseSplash() {
+    if (!mounted || _unlockedDeveloper || _logoPresses >= 5) return;
+    ref.read(splashHoldProvider.notifier).release();
+    authLog('Splash hold released — router may leave splash');
+  }
+
+  void _onLogoLongPress() {
+    if (_unlockedDeveloper) return;
+    setState(() => _logoPresses += 1);
+    authLog('Splash logo long-press count=$_logoPresses');
+    // Extend the window while the user is actively unlocking.
+    if (_logoPresses < 5) {
+      _armSplashRelease();
+    }
+    if (_logoPresses >= 5 && mounted) {
+      _unlockedDeveloper = true;
+      _navTimer?.cancel();
+      // Keep hold true until we leave; then clear so future launches work.
+      context.go(RouteConstants.developerDashboard);
+      // Defer releasing hold so redirect does not yank us away mid-navigation.
+      Future.microtask(() {
+        if (!mounted) return;
+        ref.read(splashHoldProvider.notifier).release();
+      });
+    }
   }
 
   @override
   void dispose() {
+    _navTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -65,16 +107,19 @@ class _SplashScreenState extends State<SplashScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(22),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-                  child: const Icon(
-                    Icons.lock_open_rounded,
-                    size: 56,
-                    color: Colors.white,
+                GestureDetector(
+                  onLongPress: _onLogoLongPress,
+                  child: Container(
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                    child: const Icon(
+                      Icons.lock_open_rounded,
+                      size: 56,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 28),
@@ -89,6 +134,15 @@ class _SplashScreenState extends State<SplashScreen>
                     color: Colors.white.withValues(alpha: 0.85),
                   ),
                 ),
+                if (_logoPresses > 0 && _logoPresses < 5) ...[
+                  const SizedBox(height: 20),
+                  Text(
+                    'Developer unlock $_logoPresses/5',
+                    style: AppTextStyles.caption.copyWith(
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -98,8 +152,56 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-class LoginScreen extends StatelessWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
+
+  @override
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends ConsumerState<LoginScreen> {
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _signIn() async {
+    final email = _email.text.trim();
+    final password = _password.text;
+    if (email.isEmpty || password.isEmpty) {
+      showAppSnackBar(context, 'Enter email and password');
+      return;
+    }
+    if (!email.contains('@')) {
+      showAppSnackBar(context, 'Enter a valid email address');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final user = await ref.read(authSessionProvider.notifier).login(
+            email,
+            password,
+          );
+      if (!mounted) return;
+      // GoRouter redirect also handles this; keep explicit nav as a fallback.
+      if (user.isAdmin) {
+        context.go('/admin/dashboard');
+      } else {
+        context.go('/location-permission');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnackBar(context, userFacingError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -119,16 +221,19 @@ class LoginScreen extends StatelessWidget {
                   style: AppTextStyles.body.copyWith(color: AppColors.muted),
                 ),
                 const SizedBox(height: 36),
-                const TextField(
-                  decoration: InputDecoration(
+                TextField(
+                  controller: _email,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
                     labelText: 'Email',
                     prefixIcon: Icon(Icons.mail_outline_rounded),
                   ),
                 ),
                 const SizedBox(height: 14),
-                const TextField(
+                TextField(
+                  controller: _password,
                   obscureText: true,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     labelText: 'Password',
                     prefixIcon: Icon(Icons.lock_outline_rounded),
                   ),
@@ -136,14 +241,17 @@ class LoginScreen extends StatelessWidget {
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
-                    onPressed: () {},
+                    onPressed: () => showAppSnackBar(
+                      context,
+                      'Dev reset: run npm run seed:admin in the server folder',
+                    ),
                     child: const Text('Forgot password?'),
                   ),
                 ),
                 const SizedBox(height: 8),
                 PrimaryButton(
-                  label: 'Sign In',
-                  onPressed: () => context.go('/location-permission'),
+                  label: _busy ? 'Signing in…' : 'Sign In',
+                  onPressed: _busy ? null : _signIn,
                 ),
                 const SizedBox(height: 12),
                 SecondaryButton(
@@ -172,8 +280,78 @@ class LoginScreen extends StatelessWidget {
   }
 }
 
-class SignupScreen extends StatelessWidget {
+class SignupScreen extends ConsumerStatefulWidget {
   const SignupScreen({super.key});
+
+  @override
+  ConsumerState<SignupScreen> createState() => _SignupScreenState();
+}
+
+class _SignupScreenState extends ConsumerState<SignupScreen> {
+  final _name = TextEditingController();
+  final _email = TextEditingController();
+  final _phone = TextEditingController();
+  final _password = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _phone.dispose();
+    _password.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _signUp() async {
+    final name = _name.text.trim();
+    final email = _email.text.trim();
+    final phone = _phone.text.trim();
+    final password = _password.text;
+    if (name.length < 2) {
+      showAppSnackBar(context, 'Enter your full name');
+      return;
+    }
+    if (!email.contains('@')) {
+      showAppSnackBar(context, 'Enter a valid campus email');
+      return;
+    }
+    if (phone.replaceAll(RegExp(r'\D'), '').length < 7) {
+      showAppSnackBar(context, 'Enter a valid phone number');
+      return;
+    }
+    if (password.length < 8 ||
+        !RegExp(r'[A-Za-z]').hasMatch(password) ||
+        !RegExp(r'[0-9]').hasMatch(password)) {
+      showAppSnackBar(
+        context,
+        'Password needs 8+ characters with a letter and a number',
+      );
+      return;
+    }
+    if (password != _confirm.text) {
+      showAppSnackBar(context, 'Passwords do not match');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await ref.read(authSessionProvider.notifier).signup(
+            name: name,
+            email: email,
+            phone: phone,
+            password: password,
+          );
+      if (!mounted) return;
+      context.go('/location-permission');
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnackBar(context, userFacingError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -190,39 +368,54 @@ class SignupScreen extends StatelessWidget {
               style: AppTextStyles.body.copyWith(color: AppColors.muted),
             ),
             const SizedBox(height: 28),
-            const TextField(
-              decoration: InputDecoration(
+            TextField(
+              controller: _name,
+              decoration: const InputDecoration(
                 labelText: 'Full name',
                 prefixIcon: Icon(Icons.person_outline_rounded),
               ),
             ),
             const SizedBox(height: 14),
-            const TextField(
-              decoration: InputDecoration(
+            TextField(
+              controller: _email,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
                 labelText: 'Campus email',
                 prefixIcon: Icon(Icons.mail_outline_rounded),
               ),
             ),
             const SizedBox(height: 14),
-            const TextField(
+            TextField(
+              controller: _phone,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Phone',
+                prefixIcon: Icon(Icons.phone_outlined),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _password,
               obscureText: true,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Password',
+                helperText: 'Min 8 chars, include a letter and a number',
                 prefixIcon: Icon(Icons.lock_outline_rounded),
               ),
             ),
             const SizedBox(height: 14),
-            const TextField(
+            TextField(
+              controller: _confirm,
               obscureText: true,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Confirm password',
                 prefixIcon: Icon(Icons.lock_outline_rounded),
               ),
             ),
             const SizedBox(height: 24),
             PrimaryButton(
-              label: 'Sign Up',
-              onPressed: () => context.go('/location-permission'),
+              label: _busy ? 'Creating…' : 'Sign Up',
+              onPressed: _busy ? null : _signUp,
             ),
             const SizedBox(height: 12),
             SecondaryButton(
@@ -236,11 +429,11 @@ class SignupScreen extends StatelessWidget {
   }
 }
 
-class LocationPermissionScreen extends StatelessWidget {
+class LocationPermissionScreen extends ConsumerWidget {
   const LocationPermissionScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       body: SafeArea(
         child: ResponsiveCenter(
@@ -272,7 +465,10 @@ class LocationPermissionScreen extends StatelessWidget {
               PrimaryButton(
                 label: 'Enable Location',
                 icon: Icons.location_on_outlined,
-                onPressed: () => context.go('/home'),
+                onPressed: () async {
+                  await ref.read(locationServiceProvider).ensurePermission();
+                  if (context.mounted) context.go('/home');
+                },
               ),
               const SizedBox(height: 12),
               SecondaryButton(
@@ -287,3 +483,5 @@ class LocationPermissionScreen extends StatelessWidget {
     );
   }
 }
+
+

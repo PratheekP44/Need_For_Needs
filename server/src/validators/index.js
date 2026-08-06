@@ -1,15 +1,12 @@
 'use strict';
 
-/**
- * express-validator is installed and ready for later phase validators.
- * No request validation rules are defined in the architecture phase.
- */
 const {
   body,
   param,
   query,
   validationResult,
 } = require('express-validator');
+const authValidators = require('./auth.validator');
 
 function collectValidationErrors(req) {
   return validationResult(req);
@@ -21,4 +18,5 @@ module.exports = {
   query,
   validationResult,
   collectValidationErrors,
+  ...authValidators,
 };

@@ -1,21 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/data/fake_data.dart';
+import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/widgets/page_scaffold.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
+import '../../../core/widgets/ux.dart';
 
-class PaymentSuccessScreen extends StatefulWidget {
+class PaymentSuccessScreen extends ConsumerStatefulWidget {
   const PaymentSuccessScreen({super.key});
 
   @override
-  State<PaymentSuccessScreen> createState() => _PaymentSuccessScreenState();
+  ConsumerState<PaymentSuccessScreen> createState() =>
+      _PaymentSuccessScreenState();
 }
 
-class _PaymentSuccessScreenState extends State<PaymentSuccessScreen>
+class _PaymentSuccessScreenState extends ConsumerState<PaymentSuccessScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _scale;
@@ -40,6 +43,9 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen>
 
   @override
   Widget build(BuildContext context) {
+    final payment = ref.watch(lastPaymentResultProvider);
+    final lockerName = payment?.lockerName ?? 'your locker';
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -65,13 +71,37 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen>
                 ),
               ),
               const SizedBox(height: 28),
-              Text('Payment successful', style: AppTextStyles.headline, textAlign: TextAlign.center),
+              Text(
+                'Payment successful',
+                style: AppTextStyles.headline,
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 10),
               Text(
-                'Your items are reserved at ${FakeData.orders.first.lockerName}.',
+                'Your items are reserved at $lockerName.',
                 style: AppTextStyles.body.copyWith(color: AppColors.muted),
                 textAlign: TextAlign.center,
               ),
+              if (payment != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Order ${payment.orderNumber}',
+                  style: AppTextStyles.label,
+                  textAlign: TextAlign.center,
+                ),
+                if (payment.gatewayPaymentId.isNotEmpty)
+                  Text(
+                    'Payment ${payment.gatewayPaymentId}',
+                    style: AppTextStyles.caption,
+                    textAlign: TextAlign.center,
+                  ),
+                if (payment.boxes.isNotEmpty)
+                  Text(
+                    'Box ${payment.boxes.join(', ')}',
+                    style: AppTextStyles.caption,
+                    textAlign: TextAlign.center,
+                  ),
+              ],
               const Spacer(),
               PrimaryButton(
                 label: 'Collect Item',
@@ -91,76 +121,102 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen>
   }
 }
 
-class CollectItemScreen extends StatelessWidget {
+class CollectItemScreen extends ConsumerWidget {
   const CollectItemScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final order = FakeData.orders.first;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final payment = ref.watch(lastPaymentResultProvider);
+    final orders = ref.watch(_latestOrderProvider);
 
-    return PageScaffold(
-      title: 'Collect item',
-      bottom: PrimaryButton(
-        label: 'Open Locker',
-        icon: Icons.lock_open_rounded,
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('BLE open locker placeholder'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        },
+    return orders.when(
+      loading: () => const PageScaffold(
+        title: 'Collect item',
+        body: Center(child: CircularProgressIndicator()),
       ),
-      body: ListView(
-        children: [
-          SoftPanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Order number', style: AppTextStyles.caption),
-                const SizedBox(height: 4),
-                Text(order.id, style: AppTextStyles.title),
-                const SizedBox(height: 16),
-                Text('Locker number', style: AppTextStyles.caption),
-                const SizedBox(height: 4),
-                Text(order.lockerNumber, style: AppTextStyles.title),
-                const SizedBox(height: 4),
-                Text(order.lockerName, style: AppTextStyles.body.copyWith(color: AppColors.muted)),
-              ],
-            ),
+      error: (e, _) => PageScaffold(
+        title: 'Collect item',
+        body: Center(child: Text('$e')),
+      ),
+      data: (order) {
+        final id = payment?.orderNumber ?? order?.id ?? '—';
+        final lockerName = payment?.lockerName ?? order?.lockerName ?? 'Locker';
+        final lockerNumber =
+            payment?.lockerNumber ?? order?.lockerNumber ?? '—';
+        final boxes = payment?.boxes.isNotEmpty == true
+            ? payment!.boxes
+            : (order?.boxes ?? const <String>[]);
+
+        return PageScaffold(
+          title: 'Collect item',
+          bottom: PrimaryButton(
+            label: 'Open Locker',
+            icon: Icons.lock_open_rounded,
+            onPressed: () => showComingSoon(context, 'BLE locker unlock'),
           ),
-          const SizedBox(height: 20),
-          Text('Boxes to open', style: AppTextStyles.title),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: order.boxes
-                .map(
-                  (box) => Container(
-                    width: 88,
-                    height: 88,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceMuted,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.border),
+          body: ListView(
+            children: [
+              SoftPanel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Order number', style: AppTextStyles.caption),
+                    const SizedBox(height: 4),
+                    Text(id, style: AppTextStyles.title),
+                    const SizedBox(height: 16),
+                    Text('Locker number', style: AppTextStyles.caption),
+                    const SizedBox(height: 4),
+                    Text(lockerNumber, style: AppTextStyles.title),
+                    const SizedBox(height: 4),
+                    Text(
+                      lockerName,
+                      style: AppTextStyles.body.copyWith(color: AppColors.muted),
                     ),
-                    child: Text(box, style: AppTextStyles.headline.copyWith(fontSize: 22)),
-                  ),
-                )
-                .toList(),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text('Boxes to open', style: AppTextStyles.title),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: (boxes.isEmpty ? const ['—'] : boxes)
+                    .map(
+                      (box) => Container(
+                        width: 88,
+                        height: 88,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceMuted,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Text(
+                          box,
+                          style: AppTextStyles.headline.copyWith(fontSize: 22),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+              const SizedBox(height: 24),
+              SoftPanel(
+                child: Text(
+                  'Stand near the locker and tap Open Locker. BLE pairing will be added in a later phase.',
+                  style: AppTextStyles.body.copyWith(color: AppColors.muted),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 24),
-          SoftPanel(
-            child: Text(
-              'Stand near the locker and tap Open Locker. BLE pairing will be added in a later phase.',
-              style: AppTextStyles.body.copyWith(color: AppColors.muted),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
+
+final _latestOrderProvider = FutureProvider((ref) async {
+  if (!ref.watch(authSessionProvider).isAuthenticated) return null;
+  final orders = await ref.read(orderRepositoryProvider).list();
+  return orders.isEmpty ? null : orders.first;
+});

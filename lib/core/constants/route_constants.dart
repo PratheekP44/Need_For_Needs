@@ -19,6 +19,7 @@ class RouteConstants {
   static const String collectItem = '/collect-item';
   static const String settings = '/settings';
   static const String help = '/help';
+  static const String developerDashboard = '/developer-dashboard';
 
   static const String adminLogin = '/admin/login';
   static const String adminDashboard = '/admin/dashboard';
@@ -26,5 +27,9 @@ class RouteConstants {
   static const String adminInventory = '/admin/inventory';
   static const String adminInventoryAdd = '/admin/inventory/add';
   static const String adminInventoryEdit = '/admin/inventory/edit/:id';
+  static const String adminInventoryAssign = '/admin/inventory/assign';
   static const String adminOrders = '/admin/orders';
+  static const String adminVirtualMcu = '/admin/virtual-mcu';
+  static const String adminBleDebug = '/admin/ble-debug';
+  static const String bleDebug = '/ble-debug';
 }

@@ -1,0 +1,134 @@
+{
+  "info": {
+    "_postman_id": "campus-essentials-payments-phase9",
+    "name": "Campus Essentials - Payments (Razorpay)",
+    "description": "Phase 9 Razorpay payment APIs. Use RAZORPAY_MOCK=true locally, or real keys with RAZORPAY_MOCK=false. Never trust client-side payment success — always call /payment/verify.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "userAccessToken", "value": "" },
+    { "key": "adminAccessToken", "value": "" },
+    { "key": "orderId", "value": "" },
+    { "key": "paymentId", "value": "" },
+    { "key": "razorpayOrderId", "value": "" },
+    { "key": "razorpayPaymentId", "value": "" },
+    { "key": "razorpaySignature", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Create Razorpay Order",
+      "event": [{
+        "listen": "test",
+        "script": {
+          "exec": [
+            "const j=pm.response.json();",
+            "if(j.data&&j.data.payment){",
+            "  pm.collectionVariables.set('paymentId', j.data.payment.id);",
+            "}",
+            "if(j.data&&j.data.razorpay){",
+            "  pm.collectionVariables.set('razorpayOrderId', j.data.razorpay.orderId);",
+            "}"
+          ]
+        }
+      }],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{userAccessToken}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderId\": \"{{orderId}}\"\n}"
+        },
+        "url": "{{baseUrl}}/payment/create-order",
+        "description": "Creates a Razorpay order for a WAITING_PAYMENT Campus Essentials order. Returns keyId + razorpay orderId for Checkout."
+      }
+    },
+    {
+      "name": "Verify Payment",
+      "event": [{
+        "listen": "test",
+        "script": {
+          "exec": [
+            "const j=pm.response.json();",
+            "if(j.data&&j.data.payment){",
+            "  pm.collectionVariables.set('paymentId', j.data.payment.id);",
+            "}"
+          ]
+        }
+      }],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{userAccessToken}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"razorpay_order_id\": \"{{razorpayOrderId}}\",\n  \"razorpay_payment_id\": \"{{razorpayPaymentId}}\",\n  \"razorpay_signature\": \"{{razorpaySignature}}\",\n  \"paymentMethod\": \"upi\"\n}"
+        },
+        "url": "{{baseUrl}}/payment/verify",
+        "description": "Backend verifies Razorpay HMAC signature. On success: Payment SUCCESS, Order PAYMENT_SUCCESS → READY_FOR_COLLECTION."
+      }
+    },
+    {
+      "name": "Fail Payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{userAccessToken}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderId\": \"{{orderId}}\",\n  \"reason\": \"User cancelled checkout\"\n}"
+        },
+        "url": "{{baseUrl}}/payment/fail",
+        "description": "Marks payment FAILED, sets order paymentStatus FAILED, releases reserved stock."
+      }
+    },
+    {
+      "name": "Get Payment By ID",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+        "url": "{{baseUrl}}/payment/{{paymentId}}"
+      }
+    },
+    {
+      "name": "List Payments",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/payments?page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["payments"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" },
+            { "key": "status", "value": "", "disabled": true }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Refund Placeholder (Admin)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{adminAccessToken}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"note\": \"Manual refund placeholder — no gateway call\"\n}"
+        },
+        "url": "{{baseUrl}}/payment/{{paymentId}}/refund",
+        "description": "Placeholder only. Updates Payment to REFUNDED. Does NOT call Razorpay refund API."
+      }
+    }
+  ]
+}

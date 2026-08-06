@@ -66,5 +66,13 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Need For Needs uses Bluetooth to connect to campus lockers for item collection.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Need For Needs uses Bluetooth to connect to campus lockers for item collection.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Need For Needs uses your location to show nearby campus lockers and walking distance.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Need For Needs uses your location to show nearby campus lockers and walking distance.</string>
 </dict>
 </plist>

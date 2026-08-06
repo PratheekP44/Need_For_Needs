@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../data/fake_data.dart';
+import '../data/models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import 'image_placeholder.dart';
+import 'product_image.dart';
 import 'ui_kit.dart';
 
 /// Reusable product card used on Home, Locker Details, and grids.
@@ -17,7 +18,7 @@ class ProductCard extends StatelessWidget {
     this.width,
   });
 
-  final FakeProduct product;
+  final Product product;
   final VoidCallback? onTap;
   final VoidCallback? onAddToCart;
   final double? width;
@@ -44,11 +45,12 @@ class ProductCard extends StatelessWidget {
                 children: [
                   Hero(
                     tag: 'product-image-${product.id}',
-                    child: const ImagePlaceholder(
+                    child: ProductImage(
+                      imageUrl: product.imageUrl,
                       height: 96,
                       width: double.infinity,
                       icon: Icons.shopping_bag_outlined,
-                      size: 36,
+                      iconSize: 36,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -61,29 +63,35 @@ class ProductCard extends StatelessWidget {
                       fontSize: 14,
                     ),
                   ),
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      if (product.lockerName.isNotEmpty) product.lockerName,
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.caption,
+                  ),
                   const SizedBox(height: 4),
                   PriceText(product.price),
                   const SizedBox(height: 2),
                   Text(
-                    '${product.stock} in stock',
+                    product.stock < 1
+                        ? 'Out of stock'
+                        : '${product.stock} available',
                     style: AppTextStyles.caption,
                   ),
                   const Spacer(),
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.tonal(
-                      onPressed: onAddToCart ??
-                          () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('${product.name} added to cart'),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          },
+                      onPressed: product.stock < 1
+                          ? null
+                          : onAddToCart,
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.surfaceMuted,
                         foregroundColor: AppColors.primary,
+                        disabledForegroundColor: AppColors.muted,
                         minimumSize: const Size.fromHeight(36),
                         padding: EdgeInsets.zero,
                         textStyle: AppTextStyles.caption.copyWith(
@@ -91,7 +99,7 @@ class ProductCard extends StatelessWidget {
                           color: AppColors.primary,
                         ),
                       ),
-                      child: const Text('Add to Cart'),
+                      child: Text(product.stock < 1 ? 'Out of stock' : 'Add to Cart'),
                     ),
                   ),
                 ],
@@ -111,7 +119,7 @@ class LockerCard extends StatelessWidget {
     this.onTap,
   });
 
-  final FakeLocker locker;
+  final Locker locker;
   final VoidCallback? onTap;
 
   @override
