@@ -24,7 +24,7 @@ void main() {
     expect(service.state, LockerState.disconnected);
   });
 
-  test('hardware config targets CC2340 Service UUID filter', () {
+  test('hardware config targets CC2340 GATT profile', () {
     final config = BleConfig.hardware();
     expect(config.isRealBle, isTrue);
     expect(config.serviceUuid.str.toLowerCase(), BleConfig.cc2340ServiceUuid);
@@ -36,6 +36,12 @@ void main() {
       config.notifyCharacteristicUuid.str.toLowerCase(),
       BleConfig.cc2340StatusCharacteristicUuid,
     );
+    expect(
+      config.secondaryWriteCharacteristicUuid?.str.toLowerCase(),
+      BleConfig.cc2340SecondaryWriteCharacteristicUuid,
+    );
+    expect(config.targetDeviceName, 'LKRM-V2');
     expect(config.deviceNamePrefix, isEmpty);
+    expect(config.scanTimeout, const Duration(seconds: 15));
   });
 }

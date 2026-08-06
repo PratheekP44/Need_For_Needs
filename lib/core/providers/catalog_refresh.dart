@@ -19,6 +19,7 @@ final inventoryEpochProvider =
     NotifierProvider<InventoryEpoch, int>(InventoryEpoch.new);
 
 /// Refreshes customer + admin surfaces after payment / inventory SSE events.
+/// Prefer this for payment/cancel — not after every cart tap (optimistic UI).
 Future<void> refreshCatalogSurfaces(dynamic ref) async {
   ref.read(inventoryEpochProvider.notifier).bump();
   final futures = <Future<void>>[
@@ -30,6 +31,12 @@ Future<void> refreshCatalogSurfaces(dynamic ref) async {
     futures.add(ref.read(adminViewModelProvider.notifier).refresh());
   }
   await Future.wait(futures);
+}
+
+/// Lightweight bump so product-detail FutureProviders rebuild without
+/// re-fetching the entire home catalog.
+void bumpInventoryEpoch(dynamic ref) {
+  ref.read(inventoryEpochProvider.notifier).bump();
 }
 
 /// Keeps an SSE subscription alive while the user is authenticated.

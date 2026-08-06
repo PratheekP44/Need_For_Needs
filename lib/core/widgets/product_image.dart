@@ -2,20 +2,12 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../config/env_config.dart';
 import '../providers/core_providers.dart';
 import '../theme/app_colors.dart';
+import '../utils/media_url.dart';
 import 'image_placeholder.dart';
 
-/// Resolves relative `/uploads/...` paths against the API base URL.
-String resolveMediaUrl(String? path, {String? apiBaseUrl}) {
-  final raw = (path ?? '').trim();
-  if (raw.isEmpty) return '';
-  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
-  final base = (apiBaseUrl ?? EnvConfig.development.apiBaseUrl)
-      .replaceAll(RegExp(r'/$'), '');
-  return raw.startsWith('/') ? '$base$raw' : '$base/$raw';
-}
+export '../utils/media_url.dart' show resolveMediaUrl;
 
 /// Product thumbnail with disk/memory cache; falls back to placeholder.
 class ProductImage extends ConsumerWidget {
@@ -40,7 +32,7 @@ class ProductImage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final baseUrl = ref.watch(envConfigProvider).apiBaseUrl;
+    final baseUrl = ref.watch(envConfigProvider).baseUrl;
     final url = resolveMediaUrl(imageUrl, apiBaseUrl: baseUrl);
     if (url.isEmpty) {
       return ImagePlaceholder(
@@ -59,6 +51,8 @@ class ProductImage extends ConsumerWidget {
         height: height,
         width: width,
         fit: fit,
+        memCacheWidth: width != null && width!.isFinite ? (width! * 2).round() : 600,
+        fadeInDuration: const Duration(milliseconds: 120),
         placeholder: (_, _) => Container(
           height: height,
           width: width,

@@ -18,8 +18,14 @@ class BleDebugState {
     this.serviceFound = false,
     this.char1Found = false,
     this.char4Found = false,
+    this.secondaryWriteFound = false,
     this.notificationsEnabled = false,
     this.scanning = false,
+    this.pipelineConnected = false,
+    this.pipelineServicesFound = false,
+    this.pipelineCharacteristicsFound = false,
+    this.pipelineNotifyEnabled = false,
+    this.permissionLog,
   });
 
   final List<BleDevice> devices;
@@ -33,8 +39,14 @@ class BleDebugState {
   final bool serviceFound;
   final bool char1Found;
   final bool char4Found;
+  final bool secondaryWriteFound;
   final bool notificationsEnabled;
   final bool scanning;
+  final bool pipelineConnected;
+  final bool pipelineServicesFound;
+  final bool pipelineCharacteristicsFound;
+  final bool pipelineNotifyEnabled;
+  final String? permissionLog;
 
   BleDebugState copyWith({
     List<BleDevice>? devices,
@@ -49,8 +61,14 @@ class BleDebugState {
     bool? serviceFound,
     bool? char1Found,
     bool? char4Found,
+    bool? secondaryWriteFound,
     bool? notificationsEnabled,
     bool? scanning,
+    bool? pipelineConnected,
+    bool? pipelineServicesFound,
+    bool? pipelineCharacteristicsFound,
+    bool? pipelineNotifyEnabled,
+    String? permissionLog,
     bool clearConnectedAt = false,
     bool clearRssi = false,
     bool clearMtu = false,
@@ -67,9 +85,19 @@ class BleDebugState {
       serviceFound: serviceFound ?? this.serviceFound,
       char1Found: char1Found ?? this.char1Found,
       char4Found: char4Found ?? this.char4Found,
+      secondaryWriteFound:
+          secondaryWriteFound ?? this.secondaryWriteFound,
       notificationsEnabled:
           notificationsEnabled ?? this.notificationsEnabled,
       scanning: scanning ?? this.scanning,
+      pipelineConnected: pipelineConnected ?? this.pipelineConnected,
+      pipelineServicesFound:
+          pipelineServicesFound ?? this.pipelineServicesFound,
+      pipelineCharacteristicsFound: pipelineCharacteristicsFound ??
+          this.pipelineCharacteristicsFound,
+      pipelineNotifyEnabled:
+          pipelineNotifyEnabled ?? this.pipelineNotifyEnabled,
+      permissionLog: permissionLog ?? this.permissionLog,
     );
   }
 }
@@ -166,7 +194,7 @@ class BleDebugController extends Notifier<BleDebugState> {
     }
   }
 
-  /// Scan nearby devices filtered by CC2340 Service UUID.
+  /// Scan nearby devices — unfiltered on Real BLE (debug).
   Future<void> scan() async {
     state = state.copyWith(
       busy: true,
@@ -185,11 +213,28 @@ class BleDebugController extends Notifier<BleDebugState> {
         );
         return;
       }
-      final devices = await _locker.scanForLockers();
+      // Hard ceiling so the Scan button cannot stick forever.
+      final devices = await _locker.scanForLockers().timeout(
+        const Duration(seconds: 25),
+        onTimeout: () {
+          throw TimeoutException(
+            'BLE scan timed out after 25s — check BT permissions / adapter',
+          );
+        },
+      );
+      final targets = devices.where((d) => d.isTargetLocker).length;
       state = state.copyWith(
         devices: devices,
         busy: false,
         scanning: false,
+        error: devices.isEmpty
+            ? 'Scan finished with 0 devices. Check logcat for [CE-BLE] '
+                'permission + SCAN_CB lines.'
+            : targets == 0
+                ? 'Scan found ${devices.length} device(s) but no LKRM-V2 / '
+                    'service-UUID match yet — list is unfiltered.'
+                : null,
+        clearError: targets > 0,
       );
     } catch (e) {
       state = state.copyWith(
@@ -202,7 +247,14 @@ class BleDebugController extends Notifier<BleDebugState> {
 
   /// Connect → MTU → discover GATT → subscribe to Char 4 notifications.
   Future<void> connect(BleDevice device) async {
-    state = state.copyWith(busy: true, clearError: true);
+    state = state.copyWith(
+      busy: true,
+      clearError: true,
+      pipelineConnected: false,
+      pipelineServicesFound: false,
+      pipelineCharacteristicsFound: false,
+      pipelineNotifyEnabled: false,
+    );
     try {
       await _locker.connect(device);
       final snapshot = _gattSnapshot();
@@ -221,13 +273,35 @@ class BleDebugController extends Notifier<BleDebugState> {
             snapshot.any((s) => s.characteristics.any((c) => c.isCommand)),
         char4Found: fbp?.hasStatusCharacteristic ??
             snapshot.any((s) => s.characteristics.any((c) => c.isStatus)),
+        secondaryWriteFound: fbp?.hasSecondaryWriteCharacteristic ??
+            snapshot.any(
+              (s) => s.characteristics.any((c) => c.isSecondaryWrite),
+            ),
         notificationsEnabled:
             fbp?.linkState.notificationsEnabled ?? true,
         serviceFound: serviceFound,
         rssi: device.rssi ?? state.rssi,
+        pipelineConnected: fbp?.pipelineConnected ?? true,
+        pipelineServicesFound: fbp?.pipelineServicesFound ?? serviceFound,
+        pipelineCharacteristicsFound:
+            fbp?.pipelineCharacteristicsFound ??
+                ((fbp?.hasCommandCharacteristic ?? false) &&
+                    (fbp?.hasStatusCharacteristic ?? false)),
+        pipelineNotifyEnabled:
+            fbp?.pipelineNotifyEnabled ??
+                (fbp?.linkState.notificationsEnabled ?? true),
       );
     } catch (e) {
-      state = state.copyWith(busy: false, error: e.toString());
+      final fbp = _fbp;
+      state = state.copyWith(
+        busy: false,
+        error: e.toString(),
+        pipelineConnected: fbp?.pipelineConnected ?? false,
+        pipelineServicesFound: fbp?.pipelineServicesFound ?? false,
+        pipelineCharacteristicsFound:
+            fbp?.pipelineCharacteristicsFound ?? false,
+        pipelineNotifyEnabled: fbp?.pipelineNotifyEnabled ?? false,
+      );
     }
   }
 
@@ -270,8 +344,13 @@ class BleDebugController extends Notifier<BleDebugState> {
         services: const [],
         char1Found: false,
         char4Found: false,
+        secondaryWriteFound: false,
         notificationsEnabled: false,
         serviceFound: false,
+        pipelineConnected: false,
+        pipelineServicesFound: false,
+        pipelineCharacteristicsFound: false,
+        pipelineNotifyEnabled: false,
       );
     } catch (e) {
       state = state.copyWith(busy: false, error: e.toString());

@@ -8,6 +8,7 @@ import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/widgets/page_scaffold.dart';
+import '../../../core/widgets/product_card.dart';
 import '../../../core/widgets/product_image.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
@@ -29,7 +30,9 @@ class _ProductDetailsScreenState extends ConsumerState<ProductDetailsScreen> {
   bool _busy = false;
 
   Future<void> _addToCart(Product product) async {
-    if (product.stock < 1 || _busy) return;
+    final cart = ref.read(cartViewModelProvider);
+    final available = displayStockFor(product, cart);
+    if (available < 1 || _busy) return;
     setState(() => _busy = true);
     try {
       await ref.read(cartViewModelProvider.notifier).addStock(
@@ -49,6 +52,7 @@ class _ProductDetailsScreenState extends ConsumerState<ProductDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(_productDetailsProvider(widget.productId));
+    final cart = ref.watch(cartViewModelProvider);
 
     return async.when(
       loading: () => const PageScaffold(
@@ -65,8 +69,14 @@ class _ProductDetailsScreenState extends ConsumerState<ProductDetailsScreen> {
       data: (data) {
         final product = data.product;
         final locker = data.locker;
-        final outOfStock = product.stock < 1;
-        final maxQty = product.stock.clamp(1, 99);
+        final stock = displayStockFor(product, cart);
+        final outOfStock = stock < 1;
+        final maxQty = stock.clamp(1, 99);
+        if (_qty > maxQty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _qty > maxQty) setState(() => _qty = maxQty);
+          });
+        }
 
         return PageScaffold(
           title: 'Product details',
@@ -125,7 +135,7 @@ class _ProductDetailsScreenState extends ConsumerState<ProductDetailsScreen> {
                     Text(
                       outOfStock
                           ? 'Currently unavailable'
-                          : '${product.stock} in stock at ${locker?.name ?? 'locker'}',
+                          : '$stock in stock at ${locker?.name ?? 'locker'}',
                       style: AppTextStyles.caption,
                     ),
                     if (!outOfStock) ...[

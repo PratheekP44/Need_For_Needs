@@ -16,7 +16,9 @@ class BleConfig {
     required this.writeCharacteristicUuid,
     required this.notifyCharacteristicUuid,
     required this.deviceNamePrefix,
-    this.scanTimeout = const Duration(seconds: 8),
+    this.secondaryWriteCharacteristicUuid,
+    this.targetDeviceName = 'LKRM-V2',
+    this.scanTimeout = const Duration(seconds: 15),
     this.connectTimeout = const Duration(seconds: 10),
     this.desiredMtu = 512,
     this.autoReconnect = true,
@@ -43,8 +45,14 @@ class BleConfig {
   /// Characteristic 4 — Locker → phone notifications (status). Max 16 bytes.
   final Guid notifyCharacteristicUuid;
 
+  /// Optional second WRITE characteristic (firmware / SmartAAP C3).
+  final Guid? secondaryWriteCharacteristicUuid;
+
+  /// Exact advertised name used to highlight the target locker in debug scan.
+  final String targetDeviceName;
+
   /// Advertised name prefix used while scanning.
-  /// Empty string = no name filter (service UUID filter only).
+  /// Empty string = no name filter.
   final String deviceNamePrefix;
 
   final Duration scanTimeout;
@@ -96,7 +104,9 @@ class BleConfig {
     String? serviceUuid,
     String? writeCharacteristicUuid,
     String? notifyCharacteristicUuid,
+    String? secondaryWriteCharacteristicUuid,
     String deviceNamePrefix = '',
+    String targetDeviceName = 'LKRM-V2',
   }) =>
       BleConfig(
         serviceUuid: Guid(serviceUuid ?? cc2340ServiceUuid),
@@ -104,7 +114,13 @@ class BleConfig {
             Guid(writeCharacteristicUuid ?? cc2340CommandCharacteristicUuid),
         notifyCharacteristicUuid:
             Guid(notifyCharacteristicUuid ?? cc2340StatusCharacteristicUuid),
+        secondaryWriteCharacteristicUuid: Guid(
+          secondaryWriteCharacteristicUuid ??
+              cc2340SecondaryWriteCharacteristicUuid,
+        ),
         deviceNamePrefix: deviceNamePrefix,
+        targetDeviceName: targetDeviceName,
+        scanTimeout: const Duration(seconds: 15),
         useVirtualMcuTransport: false,
         useMockTransport: false,
         desiredMtu: 512,
@@ -117,7 +133,9 @@ class BleConfig {
     Guid? serviceUuid,
     Guid? writeCharacteristicUuid,
     Guid? notifyCharacteristicUuid,
+    Guid? secondaryWriteCharacteristicUuid,
     String? deviceNamePrefix,
+    String? targetDeviceName,
     Duration? scanTimeout,
     Duration? connectTimeout,
     int? desiredMtu,
@@ -141,7 +159,10 @@ class BleConfig {
           writeCharacteristicUuid ?? this.writeCharacteristicUuid,
       notifyCharacteristicUuid:
           notifyCharacteristicUuid ?? this.notifyCharacteristicUuid,
+      secondaryWriteCharacteristicUuid: secondaryWriteCharacteristicUuid ??
+          this.secondaryWriteCharacteristicUuid,
       deviceNamePrefix: deviceNamePrefix ?? this.deviceNamePrefix,
+      targetDeviceName: targetDeviceName ?? this.targetDeviceName,
       scanTimeout: scanTimeout ?? this.scanTimeout,
       connectTimeout: connectTimeout ?? this.connectTimeout,
       desiredMtu: desiredMtu ?? this.desiredMtu,
@@ -177,6 +198,10 @@ class BleConfig {
       '3f43d273-e6d2-d4bf-a948-08de3293ed76';
   static const String cc2340StatusCharacteristicUuid =
       '3f43d273-e6d2-d4bf-a948-08de3393ed76';
+
+  /// Second WRITE characteristic present on LKRM-V2 / CC2340 firmware.
+  static const String cc2340SecondaryWriteCharacteristicUuid =
+      '1e96e241-8684-41e2-bb58-5c1b25597afa';
 
   /// Reference-only SmartAAP UUIDs (not used by Campus Essentials firmware).
   static const String smartAapServiceUuid =

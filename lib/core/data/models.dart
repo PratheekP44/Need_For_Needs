@@ -51,6 +51,38 @@ class Product {
 
   bool get isAvailable =>
       availability == 'available' && stock > 0 && hasCartMapping;
+
+  Product copyWith({
+    String? id,
+    String? name,
+    double? price,
+    int? stock,
+    String? categoryId,
+    String? lockerId,
+    String? stockId,
+    String? boxId,
+    String? lockerName,
+    int? boxNumber,
+    String? availability,
+    String? imageUrl,
+    String? description,
+  }) {
+    return Product(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      price: price ?? this.price,
+      stock: stock ?? this.stock,
+      categoryId: categoryId ?? this.categoryId,
+      lockerId: lockerId ?? this.lockerId,
+      stockId: stockId ?? this.stockId,
+      boxId: boxId ?? this.boxId,
+      lockerName: lockerName ?? this.lockerName,
+      boxNumber: boxNumber ?? this.boxNumber,
+      availability: availability ?? this.availability,
+      imageUrl: imageUrl ?? this.imageUrl,
+      description: description ?? this.description,
+    );
+  }
 }
 
 class Locker {
@@ -113,6 +145,20 @@ class CartLine {
   final double? lineTotal;
 
   double get computedLineTotal => lineTotal ?? product.price * quantity;
+
+  CartLine copyWith({
+    String? cartItemId,
+    Product? product,
+    int? quantity,
+    double? lineTotal,
+  }) {
+    return CartLine(
+      cartItemId: cartItemId ?? this.cartItemId,
+      product: product ?? this.product,
+      quantity: quantity ?? this.quantity,
+      lineTotal: lineTotal ?? this.lineTotal,
+    );
+  }
 }
 
 class OrderSummary {

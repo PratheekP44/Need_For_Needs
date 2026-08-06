@@ -37,7 +37,11 @@ String userFacingError(Object error) {
       return 'Server unavailable. Please try again later.';
     }
     if (msg.contains('image')) return 'Image unavailable.';
-    if (error.statusCode == 404) return 'Unable to load products.';
+    if (error.statusCode == 404) {
+      if (msg.contains('cart')) return error.message;
+      if (msg.contains('route not found')) return error.message;
+      return error.message;
+    }
     return error.message;
   }
   final raw = error.toString().replaceFirst('Exception: ', '');

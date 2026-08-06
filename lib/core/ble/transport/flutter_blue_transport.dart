@@ -31,12 +31,14 @@ class GattCharacteristicInfo {
     required this.properties,
     this.isCommand = false,
     this.isStatus = false,
+    this.isSecondaryWrite = false,
   });
 
   final String uuid;
   final String properties;
   final bool isCommand;
   final bool isStatus;
+  final bool isSecondaryWrite;
 }
 
 /// Real BLE transport backed by `flutter_blue_plus` for TI CC2340R5.
@@ -92,6 +94,15 @@ class FlutterBlueTransport implements BleTransport {
   bool get hasCommandCharacteristic => _writeChar != null;
   bool get hasStatusCharacteristic => _notifyChar != null;
 
+  /// Secondary WRITE characteristic found during last GATT discovery.
+  bool hasSecondaryWriteCharacteristic = false;
+
+  /// Pipeline status strings for the BLE Debug screen.
+  bool pipelineConnected = false;
+  bool pipelineServicesFound = false;
+  bool pipelineCharacteristicsFound = false;
+  bool pipelineNotifyEnabled = false;
+
   static final Guid _cccdUuid = Guid('00002902-0000-1000-8000-00805f9b34fb');
 
   @override
@@ -143,29 +154,81 @@ class FlutterBlueTransport implements BleTransport {
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
     ];
-
     if (Platform.isAndroid) {
+      // Declared for Android ≤11 BLE scan + nearby distances; not required to
+      // *succeed* on Android 12+ when BLUETOOTH_SCAN uses neverForLocation.
       permissions.add(Permission.locationWhenInUse);
     }
 
+    BleLog.d('Permission check BEFORE request:');
+    for (final p in permissions) {
+      final s = await p.status;
+      BleLog.d('  ${p.toString()} => $s');
+    }
+
     final statuses = await permissions.request();
-    final permanentlyDenied = statuses.values.any((s) => s.isPermanentlyDenied);
-    if (permanentlyDenied) {
+    BleLog.d('Permission check AFTER request:');
+    final deniedNames = <String>[];
+    for (final entry in statuses.entries) {
+      BleLog.d('  ${entry.key} => ${entry.value}');
+      if (entry.value.isDenied ||
+          entry.value.isPermanentlyDenied ||
+          entry.value.isRestricted) {
+        deniedNames.add('${entry.key}: ${entry.value}');
+      }
+    }
+
+    final scanStatus = statuses[Permission.bluetoothScan];
+    final connectStatus = statuses[Permission.bluetoothConnect];
+    final locationStatus = statuses[Permission.locationWhenInUse];
+
+    final scanOk = scanStatus?.isGranted == true ||
+        scanStatus?.isLimited == true;
+    final connectOk = connectStatus?.isGranted == true ||
+        connectStatus?.isLimited == true;
+    final locationOk = locationStatus?.isGranted == true ||
+        locationStatus?.isLimited == true;
+
+    // On Android 12+ bluetoothScan/Connect are the real gates.
+    // On older APIs bluetoothScan may auto-grant; location is required.
+    final permanentlyDeniedBt = (scanStatus?.isPermanentlyDenied ?? false) ||
+        (connectStatus?.isPermanentlyDenied ?? false);
+
+    if (permanentlyDeniedBt) {
+      BleLog.e(
+        'BT permissions permanently denied: ${deniedNames.join(', ')}',
+      );
       await openAppSettings();
       throw StateError(
-        'Bluetooth permissions permanently denied — enable them in Settings',
+        'Bluetooth permissions permanently denied — enable Nearby devices / '
+        'Bluetooth in Settings. Denied: ${deniedNames.join(', ')}',
       );
     }
-    final denied = statuses.values.any(
-      (s) => s.isDenied || s.isRestricted,
-    );
-    if (denied) {
+
+    if (!scanOk || !connectOk) {
+      // Fallback for Android ≤11 where bluetooth* permissions may not apply.
+      if (Platform.isAndroid && locationOk && !scanOk) {
+        BleLog.d(
+          'BT_SCAN not granted but LOCATION granted — proceeding (Android ≤11)',
+        );
+        return;
+      }
+      final detail = deniedNames.isEmpty
+          ? 'BLUETOOTH_SCAN=$scanStatus BLUETOOTH_CONNECT=$connectStatus'
+          : deniedNames.join(', ');
+      BleLog.e('Required Bluetooth permissions missing: $detail');
       throw StateError(
-        'Bluetooth permissions not granted '
-        '(need BLUETOOTH_SCAN, BLUETOOTH_CONNECT'
-        '${Platform.isAndroid ? ', LOCATION' : ''})',
+        'Bluetooth permissions not granted. Denied: $detail',
       );
     }
+
+    if (Platform.isAndroid && !locationOk) {
+      BleLog.d(
+        'LOCATION not granted (ok on Android 12+ with neverForLocation). '
+        'status=$locationStatus',
+      );
+    }
+    BleLog.d('Permissions OK for BLE scan (scan=$scanOk connect=$connectOk)');
   }
 
   @override
@@ -208,65 +271,170 @@ class FlutterBlueTransport implements BleTransport {
     }
   }
 
+  bool _isTargetAdvertisement({
+    required String name,
+    required List<Guid> advertisedServices,
+  }) {
+    final targetName = config.targetDeviceName.trim();
+    if (targetName.isNotEmpty &&
+        name.toUpperCase() == targetName.toUpperCase()) {
+      return true;
+    }
+    return advertisedServices.any((u) => _guidEquals(u, config.serviceUuid));
+  }
+
+  String _hexBytes(List<int> bytes) =>
+      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
+
+  List<String> _manufacturerHex(Map<int, List<int>> data) {
+    return data.entries.map((e) {
+      final id = e.key.toRadixString(16).padLeft(4, '0');
+      return '0x$id:${_hexBytes(e.value)}';
+    }).toList();
+  }
+
+  void _logScanResult(ScanResult r, String name, bool isTarget) {
+    final adv = r.advertisementData;
+    final mfg = _manufacturerHex(adv.manufacturerData);
+    final msdRaw = adv.msd.map(_hexBytes).toList();
+    final uuids = adv.serviceUuids.map((u) => u.str).toList();
+    BleLog.d(
+      'SCAN_CB'
+      ' name="${name.isEmpty ? '(none)' : name}"'
+      ' id=${r.device.remoteId.str}'
+      ' rssi=${r.rssi}'
+      ' connectable=${adv.connectable}'
+      ' target=$isTarget'
+      ' services=$uuids'
+      ' mfg=$mfg'
+      ' msdRaw=$msdRaw',
+    );
+  }
+
   @override
   Future<List<BleDevice>> startScan({
     required Duration timeout,
     String? namePrefix,
   }) async {
+    // namePrefix intentionally ignored during debug — show ALL BLE devices.
+    // Re-introduce production filters only after discovery is proven.
     await ensurePermissions();
     await _checkBtEnabled();
-    BleLog.d('Scan start timeout=${timeout.inSeconds}s '
-        'service=${config.serviceUuid.str}');
+    final scanFor = timeout < const Duration(seconds: 15)
+        ? const Duration(seconds: 15)
+        : timeout;
+    BleLog.d(
+      'Scan start UNFILTERED timeout=${scanFor.inSeconds}s '
+      'mode=lowLatency continuousUpdates=true '
+      '(debug: no UUID/name/MSD/RSSI filters)',
+    );
 
     _seen.clear();
     await _scanSub?.cancel();
-    final prefix = namePrefix ?? config.deviceNamePrefix;
+    if (FlutterBluePlus.isScanningNow) {
+      BleLog.d('Stopping previous scan before restart');
+      await FlutterBluePlus.stopScan();
+    }
 
-    _scanSub = FlutterBluePlus.scanResults.listen((results) {
-      for (final r in results) {
-        final name = r.advertisementData.advName.isNotEmpty
-            ? r.advertisementData.advName
-            : r.device.platformName;
+    _scanSub = FlutterBluePlus.scanResults.listen(
+      (results) {
+        for (final r in results) {
+          final name = r.advertisementData.advName.isNotEmpty
+              ? r.advertisementData.advName
+              : r.device.platformName;
+          final serviceUuids =
+              r.advertisementData.serviceUuids.map((u) => u.str).toList();
+          final isTarget = _isTargetAdvertisement(
+            name: name,
+            advertisedServices: r.advertisementData.serviceUuids,
+          );
+          _logScanResult(r, name, isTarget);
 
-        // Defense-in-depth: keep only our Service UUID (OS also filters via
-        // withServices). Name prefix is optional — empty = UUID-only.
-        final advertised = r.advertisementData.serviceUuids
-            .any((u) => _guidEquals(u, config.serviceUuid));
-        // withServices may deliver a hit before serviceUuids is populated on
-        // some stacks — accept those; drop clear non-matches when listed.
-        if (r.advertisementData.serviceUuids.isNotEmpty && !advertised) {
-          continue;
+          final device = BleDevice(
+            id: r.device.remoteId.str,
+            name: name.isEmpty ? '(unnamed) ${r.device.remoteId.str}' : name,
+            rssi: r.rssi,
+            advertisementName: r.advertisementData.advName,
+            isConnectable: r.advertisementData.connectable,
+            manufacturerDataHex:
+                _manufacturerHex(r.advertisementData.manufacturerData),
+            serviceUuids: serviceUuids,
+            isTargetLocker: isTarget,
+          );
+          _seen[device.id] = device;
         }
-        if (prefix.isNotEmpty &&
-            name.isNotEmpty &&
-            !name.toUpperCase().startsWith(prefix.toUpperCase()) &&
-            !advertised) {
-          continue;
-        }
-
-        final device = BleDevice(
-          id: r.device.remoteId.str,
-          name: name.isEmpty ? 'CC2340 (${r.device.remoteId.str})' : name,
-          rssi: r.rssi,
-          advertisementName: r.advertisementData.advName,
-          isConnectable: r.advertisementData.connectable,
-        );
-        _seen[device.id] = device;
-      }
-      _scanController.add(_seen.values.toList());
-    });
-
-    // Manifest uses BLUETOOTH_SCAN neverForLocation — do not request fine
-    // location for scanning (Android 12+ Service UUID filter is enough).
-    await FlutterBluePlus.startScan(
-      timeout: timeout,
-      withServices: [config.serviceUuid],
-      androidUsesFineLocation: false,
+        final sorted = _seen.values.toList()
+          ..sort((a, b) {
+            if (a.isTargetLocker != b.isTargetLocker) {
+              return a.isTargetLocker ? -1 : 1;
+            }
+            return (b.rssi ?? -999).compareTo(a.rssi ?? -999);
+          });
+        _scanController.add(sorted);
+      },
+      onError: (Object e, StackTrace st) {
+        BleLog.e('scanResults stream error', e);
+      },
+      onDone: () {
+        BleLog.d('scanResults stream done');
+      },
     );
-    await Future<void>.delayed(timeout);
+
+    try {
+      // CRITICAL: no withServices / withNames / withMsd filters.
+      // Android ScanFilter on service UUID was hiding every device that does
+      // not advertise 3F43… in the ADV packet (LKRM-V2 may only send MSD).
+      await FlutterBluePlus.startScan(
+        timeout: scanFor,
+        continuousUpdates: true,
+        androidScanMode: AndroidScanMode.lowLatency,
+        androidUsesFineLocation: false,
+        androidCheckLocationServices: false,
+      );
+      BleLog.d('FlutterBluePlus.startScan invoked isScanningNow='
+          '${FlutterBluePlus.isScanningNow}');
+    } catch (e) {
+      BleLog.e('FlutterBluePlus.startScan failed', e);
+      await _scanSub?.cancel();
+      _scanSub = null;
+      rethrow;
+    }
+
+    // Wait until FBP timeout stops scanning, with a hard safety cap so the
+    // BLE Debug spinner can never spin forever.
+    try {
+      await FlutterBluePlus.isScanning
+          .where((scanning) => scanning == false)
+          .first
+          .timeout(scanFor + const Duration(seconds: 3));
+    } on TimeoutException {
+      BleLog.e('Scan wait timed out — forcing stopScan');
+      await stopScan();
+    } catch (e) {
+      BleLog.e('Scan wait error', e);
+      await stopScan();
+    }
     await stopScan();
-    BleLog.d('Scan done devices=${_seen.length}');
-    return _seen.values.toList();
+
+    final sorted = _seen.values.toList()
+      ..sort((a, b) {
+        if (a.isTargetLocker != b.isTargetLocker) {
+          return a.isTargetLocker ? -1 : 1;
+        }
+        return (b.rssi ?? -999).compareTo(a.rssi ?? -999);
+      });
+    final targets = sorted.where((d) => d.isTargetLocker).toList();
+    BleLog.d(
+      'Scan done total=${sorted.length} targets=${targets.length} '
+      'targetNames=${targets.map((d) => d.name).toList()}',
+    );
+    for (final d in targets) {
+      BleLog.d(
+        'TARGET_HIT name=${d.name} id=${d.id} rssi=${d.rssi} '
+        'services=${d.serviceUuids} mfg=${d.manufacturerDataHex}',
+      );
+    }
+    return sorted;
   }
 
   @override
@@ -289,6 +457,11 @@ class FlutterBlueTransport implements BleTransport {
     await stopScan();
     await _checkBtEnabled();
     BleLog.d('Connect id=${device.id} name=${device.name}');
+    pipelineConnected = false;
+    pipelineServicesFound = false;
+    pipelineCharacteristicsFound = false;
+    pipelineNotifyEnabled = false;
+    hasSecondaryWriteCharacteristic = false;
 
     final remote = BluetoothDevice.fromId(device.id);
     _device = remote;
@@ -329,10 +502,12 @@ class FlutterBlueTransport implements BleTransport {
         );
         _connected = true;
         connectedAt = DateTime.now();
+        pipelineConnected = true;
         _setFlag(BleLinkFlags.connected);
         _clearFlag(BleLinkFlags.busy);
         _connectionController.add(true);
         BleLog.d('Connected attempt=$attempt');
+        BleLog.d('PIPELINE Connected=YES');
 
         // Java: CONNECTION_PRIORITY_HIGH after connect (Android only).
         if (!kIsWeb && Platform.isAndroid) {
@@ -415,6 +590,11 @@ class FlutterBlueTransport implements BleTransport {
     lastMtu = null;
     connectedAt = null;
     _connected = false;
+    hasSecondaryWriteCharacteristic = false;
+    pipelineConnected = false;
+    pipelineServicesFound = false;
+    pipelineCharacteristicsFound = false;
+    pipelineNotifyEnabled = false;
     _setLink(const BleLinkState());
     _connectionController.add(false);
   }
@@ -456,8 +636,10 @@ class FlutterBlueTransport implements BleTransport {
 
     BluetoothCharacteristic? write;
     BluetoothCharacteristic? notify;
+    BluetoothCharacteristic? secondaryWrite;
     final snapshot = <GattServiceInfo>[];
     var serviceFound = false;
+    final secondaryUuid = config.secondaryWriteCharacteristicUuid;
 
     for (final s in services) {
       final isTarget = _guidEquals(s.uuid, config.serviceUuid);
@@ -466,25 +648,39 @@ class FlutterBlueTransport implements BleTransport {
       for (final c in s.characteristics) {
         final isCommand = _guidEquals(c.uuid, config.writeCharacteristicUuid);
         final isStatus = _guidEquals(c.uuid, config.notifyCharacteristicUuid);
+        final isSecondary = secondaryUuid != null &&
+            _guidEquals(c.uuid, secondaryUuid);
         if (isCommand) write = c;
         if (isStatus) notify = c;
+        if (isSecondary) secondaryWrite = c;
         chars.add(
           GattCharacteristicInfo(
             uuid: c.uuid.str,
             properties: _propsLabel(c.properties),
             isCommand: isCommand,
             isStatus: isStatus,
+            isSecondaryWrite: isSecondary,
           ),
         );
-        if (isTarget) {
-          BleLog.d('Characteristic ${c.uuid.str} ${_propsLabel(c.properties)}');
-        }
+        BleLog.d(
+          'GATT char service=${s.uuid.str} char=${c.uuid.str} '
+          '${_propsLabel(c.properties)}'
+          '${isCommand ? ' [WRITE/CMD]' : ''}'
+          '${isSecondary ? ' [WRITE/SEC]' : ''}'
+          '${isStatus ? ' [NOTIFY]' : ''}',
+        );
       }
       snapshot.add(
         GattServiceInfo(uuid: s.uuid.str, characteristics: chars),
       );
     }
     discoveredServices = snapshot;
+    pipelineServicesFound = serviceFound;
+    hasSecondaryWriteCharacteristic = secondaryWrite != null;
+    BleLog.d(
+      'PIPELINE Services Found=${serviceFound ? 'YES' : 'NO'} '
+      '(looking for ${config.serviceUuid.str})',
+    );
 
     if (!serviceFound) {
       _fail('BT No Services — missing ${config.serviceUuid.str}');
@@ -493,16 +689,32 @@ class FlutterBlueTransport implements BleTransport {
       );
     }
     if (write == null || notify == null) {
-      _fail('BT Bad Service — Char1=${write != null} Char4=${notify != null}');
+      pipelineCharacteristicsFound = false;
+      _fail(
+        'BT Bad Service — Char1=${write != null} Char4=${notify != null} '
+        'SecWrite=${secondaryWrite != null}',
+      );
       throw StateError(
         'BT Bad Service — '
-        'command(Char1)=${write != null} status(Char4)=${notify != null}',
+        'command(Char1)=${write != null} status(Char4)=${notify != null} '
+        'secondaryWrite=${secondaryWrite != null}',
+      );
+    }
+    // Secondary WRITE is expected on LKRM-V2 but not required for notify path.
+    if (secondaryUuid != null && secondaryWrite == null) {
+      BleLog.d(
+        'Secondary WRITE ${secondaryUuid.str} not found '
+        '(continuing — command+notify present)',
       );
     }
     _writeChar = write;
     _notifyChar = notify;
+    pipelineCharacteristicsFound = true;
     _setFlag(BleLinkFlags.servicesDiscovered);
-    BleLog.d('Services discovered Char1=yes Char4=yes');
+    BleLog.d(
+      'PIPELINE Characteristics Found=YES '
+      'Char1=yes Char4=yes SecWrite=${secondaryWrite != null}',
+    );
   }
 
   String _propsLabel(CharacteristicProperties p) {
@@ -551,7 +763,9 @@ class FlutterBlueTransport implements BleTransport {
       _notificationController.add(bytes);
     });
     _setFlag(BleLinkFlags.notificationsEnabled);
+    pipelineNotifyEnabled = true;
     BleLog.d('BT Ready (notifications on)');
+    BleLog.d('PIPELINE Notify Enabled=YES');
   }
 
   @override

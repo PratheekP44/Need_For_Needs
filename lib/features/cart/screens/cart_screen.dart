@@ -25,14 +25,15 @@ class CartScreen extends ConsumerWidget {
     final items = cart.items;
     final grandTotal =
         cart.grandTotal > 0 ? cart.grandTotal : cart.subtotal + cart.tax;
-    final busy = cart.isLoading;
+    // Only block destructive clear / checkout while an initial fetch is empty.
+    final initialLoading = cart.isLoading && items.isEmpty;
 
     return PageScaffold(
       title: 'Cart',
       actions: [
         if (items.isNotEmpty)
           TextButton(
-            onPressed: busy
+            onPressed: initialLoading
                 ? null
                 : () async {
                     final confirmed = await showDialog<bool>(
@@ -112,11 +113,11 @@ class CartScreen extends ConsumerWidget {
                 PrimaryButton(
                   label: 'Checkout',
                   onPressed:
-                      busy ? null : () => context.push('/checkout'),
+                      initialLoading ? null : () => context.push('/checkout'),
                 ),
               ],
             ),
-      body: cart.isLoading && items.isEmpty
+      body: initialLoading
           ? const Center(child: CircularProgressIndicator())
           : items.isEmpty
               ? EmptyState(
@@ -132,7 +133,9 @@ class CartScreen extends ConsumerWidget {
                   itemBuilder: (context, index) {
                     final item = items[index];
                     final maxStock = item.product.stock;
+                    final syncing = item.cartItemId.startsWith('local-');
                     return SoftPanel(
+                      key: ValueKey(item.cartItemId),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -161,7 +164,7 @@ class CartScreen extends ConsumerWidget {
                                   children: [
                                     QuantitySelector(
                                       quantity: item.quantity,
-                                      onDecrement: busy
+                                      onDecrement: syncing
                                           ? null
                                           : () async {
                                               try {
@@ -183,7 +186,7 @@ class CartScreen extends ConsumerWidget {
                                                 }
                                               }
                                             },
-                                      onIncrement: busy ||
+                                      onIncrement: syncing ||
                                               (maxStock > 0 &&
                                                   item.quantity >= maxStock)
                                           ? null
@@ -210,7 +213,7 @@ class CartScreen extends ConsumerWidget {
                                     ),
                                     const Spacer(),
                                     IconButton(
-                                      onPressed: busy
+                                      onPressed: syncing
                                           ? null
                                           : () async {
                                               try {

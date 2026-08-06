@@ -19,6 +19,8 @@ class BleDebugScreen extends ConsumerWidget {
     final ctrl = ref.read(bleDebugProvider.notifier);
     final config = ref.watch(bleConfigProvider);
     final mode = ref.watch(bleConfigProvider.notifier).mode;
+    final targetCount =
+        state.devices.where((d) => d.isTargetLocker).length;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -69,7 +71,7 @@ class BleDebugScreen extends ConsumerWidget {
                 const SizedBox(height: 8),
                 Text(
                   mode == BleTransportMode.realBle
-                      ? 'FlutterBluePlus → CC2340R5 (Android)'
+                      ? 'FlutterBluePlus → unfiltered scan (15s, lowLatency)'
                       : 'In-process Virtual MCU (no radio)',
                   style: AppTextStyles.caption,
                 ),
@@ -77,15 +79,25 @@ class BleDebugScreen extends ConsumerWidget {
             ),
           ),
           _Section(
-            title: 'GATT Profile (filter / target)',
+            title: 'GATT Profile (connect target)',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _UuidRow('Service', config.serviceUuid.str),
                 const SizedBox(height: 6),
-                _UuidRow('Char 1 · Command', config.writeCharacteristicUuid.str),
+                _UuidRow('Char 1 · Command WRITE', config.writeCharacteristicUuid.str),
                 const SizedBox(height: 6),
-                _UuidRow('Char 4 · Status', config.notifyCharacteristicUuid.str),
+                _UuidRow(
+                  'Char · Secondary WRITE',
+                  config.secondaryWriteCharacteristicUuid?.str ?? '—',
+                ),
+                const SizedBox(height: 6),
+                _UuidRow('Char 4 · Status NOTIFY', config.notifyCharacteristicUuid.str),
+                const SizedBox(height: 6),
+                Text(
+                  'Highlight name: ${config.targetDeviceName}',
+                  style: AppTextStyles.caption,
+                ),
               ],
             ),
           ),
@@ -101,10 +113,36 @@ class BleDebugScreen extends ConsumerWidget {
                 _Chip('Duration', ctrl.connectionDurationLabel()),
                 _Chip('Service', state.serviceFound ? '✓' : '—'),
                 _Chip('Char 1', state.char1Found ? '✓' : '—'),
+                _Chip('Sec WRITE', state.secondaryWriteFound ? '✓' : '—'),
                 _Chip('Char 4', state.char4Found ? '✓' : '—'),
                 _Chip(
                   'Notify',
                   state.notificationsEnabled ? 'Subscribed' : '—',
+                ),
+              ],
+            ),
+          ),
+          _Section(
+            title: 'Connect pipeline',
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                _Chip(
+                  'Connected',
+                  state.pipelineConnected ? 'YES' : '—',
+                ),
+                _Chip(
+                  'Services Found',
+                  state.pipelineServicesFound ? 'YES' : '—',
+                ),
+                _Chip(
+                  'Characteristics Found',
+                  state.pipelineCharacteristicsFound ? 'YES' : '—',
+                ),
+                _Chip(
+                  'Notify Enabled',
+                  state.pipelineNotifyEnabled ? 'YES' : '—',
                 ),
               ],
             ),
@@ -146,30 +184,67 @@ class BleDebugScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           _Section(
-            title: 'Nearby devices (${state.devices.length})',
+            title:
+                'Nearby devices (${state.devices.length}'
+                '${targetCount > 0 ? ', $targetCount target' : ''})',
             child: state.devices.isEmpty
                 ? Text(
                     mode == BleTransportMode.realBle
-                        ? 'No devices — grant BT permissions, turn on Bluetooth, then Scan'
+                        ? 'No devices — grant Nearby devices + Bluetooth, '
+                            'turn on Bluetooth, then Scan (unfiltered 15s)'
                         : 'No devices — tap Scan (Virtual MCU advertises one locker)',
                     style: AppTextStyles.caption,
                   )
                 : Column(
                     children: state.devices.map((d) {
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.bluetooth_searching),
-                        title: Text(d.name, style: AppTextStyles.label),
-                        subtitle: Text(
-                          '${d.id}\nRSSI ${d.rssi ?? '—'} dBm'
-                          '${d.isConnectable ? '' : ' · not connectable'}',
-                          style: AppTextStyles.caption,
-                        ),
-                        isThreeLine: true,
-                        trailing: FilledButton(
-                          onPressed:
-                              state.busy ? null : () => ctrl.connect(d),
-                          child: const Text('Connect'),
+                      final highlight = d.isTargetLocker;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: highlight
+                            ? BoxDecoration(
+                                color: AppColors.primary.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: AppColors.primary,
+                                  width: 1.5,
+                                ),
+                              )
+                            : null,
+                        child: ListTile(
+                          contentPadding: highlight
+                              ? const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                )
+                              : EdgeInsets.zero,
+                          leading: Icon(
+                            highlight
+                                ? Icons.bluetooth_connected
+                                : Icons.bluetooth_searching,
+                            color: highlight ? AppColors.primary : null,
+                          ),
+                          title: Text(
+                            highlight ? '★ ${d.name}' : d.name,
+                            style: AppTextStyles.label.copyWith(
+                              color: highlight ? AppColors.primary : null,
+                              fontWeight:
+                                  highlight ? FontWeight.w700 : null,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '${d.id}\n'
+                            'RSSI ${d.rssi ?? '—'} dBm'
+                            '${d.isConnectable ? '' : ' · not connectable'}'
+                            '${d.serviceUuids.isEmpty ? '' : '\nUUID ${d.serviceUuids.join(', ')}'}'
+                            '${d.manufacturerDataHex.isEmpty ? '' : '\nMSD ${d.manufacturerDataHex.join(' | ')}'}',
+                            style: AppTextStyles.caption,
+                          ),
+                          isThreeLine: true,
+                          trailing: FilledButton(
+                            onPressed:
+                                state.busy ? null : () => ctrl.connect(d),
+                            child: const Text('Connect'),
+                          ),
                         ),
                       );
                     }).toList(),
@@ -196,10 +271,12 @@ class BleDebugScreen extends ConsumerWidget {
                             ),
                             ...s.characteristics.map((c) {
                               final tag = c.isCommand
-                                  ? ' [Char 1 · Command]'
-                                  : c.isStatus
-                                      ? ' [Char 4 · Status]'
-                                      : '';
+                                  ? ' [Char 1 · Command WRITE]'
+                                  : c.isSecondaryWrite
+                                      ? ' [Secondary WRITE]'
+                                      : c.isStatus
+                                          ? ' [Char 4 · Status NOTIFY]'
+                                          : '';
                               return Padding(
                                 padding: const EdgeInsets.only(top: 4),
                                 child: Text(
@@ -216,8 +293,8 @@ class BleDebugScreen extends ConsumerWidget {
                   ),
           ),
           Text(
-            'Phase 13A scope: scan → connect → discover → notify. '
-            'Authentication and packet exchange are not enabled here.',
+            'Phase 13A scope: unfiltered scan → connect → discover → notify. '
+            'Watch logcat tag [CE-BLE] for SCAN_CB / PIPELINE lines.',
             style: AppTextStyles.caption.copyWith(color: AppColors.muted),
           ),
           const SizedBox(height: 32),

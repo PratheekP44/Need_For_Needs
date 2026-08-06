@@ -15,16 +15,21 @@ const { formatItem } = require('./item.service');
 function formatNested(doc, fields) {
   if (!doc) return null;
   if (typeof doc !== 'object') return doc;
-  const out = { id: doc._id || doc.id };
+  const out = { id: doc._id != null ? String(doc._id) : doc.id };
   fields.forEach((field) => {
     if (doc[field] !== undefined) out[field] = doc[field];
   });
   return out;
 }
 
+function linePublicId(line) {
+  if (line && line._id != null) return String(line._id);
+  return '';
+}
+
 function formatCart(cart) {
   return {
-    id: cart._id,
+    id: cart._id != null ? String(cart._id) : cart._id,
     cartId: cart.cartId,
     user: cart.user,
     status: cart.status,
@@ -33,7 +38,8 @@ function formatCart(cart) {
     tax: cart.tax,
     grandTotal: cart.grandTotal,
     items: (cart.items || []).map((line) => ({
-      id: line._id,
+      // Always a string — Flutter DELETE /cart/remove/:id depends on this.
+      id: linePublicId(line),
       quantity: line.quantity,
       priceAtPurchase: line.priceAtPurchase,
       gstPercentage: line.gstPercentage,
@@ -356,8 +362,12 @@ class CartService {
       throw new AppError('Quantity must be a positive integer', 400);
     }
 
+    const id = String(cartItemId || '').trim();
     const cart = await this.getOrCreateActiveCart(userId);
-    const line = cart.items.id(cartItemId);
+    let line = cart.items.id(id);
+    if (!line) {
+      line = cart.items.find((entry) => String(entry._id) === id) || null;
+    }
     if (!line) {
       throw new AppError('Cart item not found', 404);
     }
@@ -390,13 +400,23 @@ class CartService {
   }
 
   async removeItem(userId, cartItemId) {
+    const id = String(cartItemId || '').trim();
+    if (!id || id === 'null' || id === 'undefined') {
+      throw new AppError('Cart item id is required', 400);
+    }
+
     const cart = await this.getOrCreateActiveCart(userId);
-    const line = cart.items.id(cartItemId);
+    // DocumentArray.id() + explicit string match (ObjectId / string safety).
+    let line = cart.items.id(id);
+    if (!line) {
+      line = cart.items.find((entry) => String(entry._id) === id) || null;
+    }
     if (!line) {
       throw new AppError('Cart item not found', 404);
     }
 
-    line.deleteOne();
+    // pull() is the reliable subdocument removal path across Mongoose versions.
+    cart.items.pull(line._id);
     const totals = summarizeLines(cart.items, cart.discount);
     cart.subtotal = totals.subtotal;
     cart.tax = totals.tax;
@@ -408,7 +428,7 @@ class CartService {
       entity: 'Cart',
       entityId: cart._id,
       userId,
-      metadata: { cartItemId },
+      metadata: { cartItemId: id },
     });
 
     const fresh = await cartRepository.findById(cart._id);

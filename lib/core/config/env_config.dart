@@ -1,4 +1,18 @@
+import 'package:flutter/foundation.dart';
+
 /// Environment configuration for API integration.
+///
+/// Single source of truth for the API base URL used by [ApiClient],
+/// inventory SSE, and media URL resolution.
+///
+/// Defaults:
+/// - Development (Flutter Web / desktop / iOS simulator): `http://127.0.0.1:5000`
+/// - Development (Android): `http://<LAN_IP>:5000`
+/// - Production (release builds): `https://need-for-needs.onrender.com`
+///
+/// Overrides (compile-time):
+/// - `--dart-define=API_BASE_URL=https://...` — full URL override
+/// - `--dart-define=LAN_IP=192.168.x.x` — Android LAN host only
 ///
 /// Razorpay Key Secret must NEVER live here — only the backend holds it.
 /// Flutter receives `keyId` from `POST /payment/create-order`.
@@ -17,19 +31,58 @@ class EnvConfig {
   final AppEnvironment environment;
   final String apiBaseUrl;
 
-  static const EnvConfig development = EnvConfig(
-    environment: AppEnvironment.development,
-    apiBaseUrl: String.fromEnvironment(
-      'API_BASE_URL',
-      defaultValue: 'http://127.0.0.1:5000',
-    ),
+  /// Alias for [apiBaseUrl] — used by media URL resolution and docs.
+  String get baseUrl => apiBaseUrl;
+
+  /// Full URL override: `--dart-define=API_BASE_URL=...`
+  static const String apiBaseUrlOverride = String.fromEnvironment('API_BASE_URL');
+
+  /// Machine LAN IP for Android debug builds.
+  /// Override: `--dart-define=LAN_IP=192.168.1.19`
+  static const String lanIp = String.fromEnvironment(
+    'LAN_IP',
+    defaultValue: '192.168.1.19',
   );
 
-  static const EnvConfig production = EnvConfig(
-    environment: AppEnvironment.production,
-    apiBaseUrl: String.fromEnvironment(
-      'API_BASE_URL',
-      defaultValue: 'https://api.example.com',
-    ),
-  );
+  static const String webDevBaseUrl = 'http://127.0.0.1:5000';
+  static const String productionBaseUrl =
+      'https://need-for-needs.onrender.com';
+
+  static String get androidDevBaseUrl => 'http://$lanIp:5000';
+
+  /// Development — Web/desktop use loopback; Android uses LAN IP.
+  static EnvConfig get development {
+    final url = apiBaseUrlOverride.isNotEmpty
+        ? apiBaseUrlOverride
+        : _developmentDefaultUrl;
+    return EnvConfig(
+      environment: AppEnvironment.development,
+      apiBaseUrl: url,
+    );
+  }
+
+  static String get _developmentDefaultUrl {
+    if (kIsWeb) return webDevBaseUrl;
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return androidDevBaseUrl;
+    }
+    return webDevBaseUrl;
+  }
+
+  /// Production — Render backend.
+  static EnvConfig get production {
+    final url = apiBaseUrlOverride.isNotEmpty
+        ? apiBaseUrlOverride
+        : productionBaseUrl;
+    return EnvConfig(
+      environment: AppEnvironment.production,
+      apiBaseUrl: url,
+    );
+  }
+
+  /// Release → production; debug/profile → development.
+  static EnvConfig resolve() {
+    if (kReleaseMode) return production;
+    return development;
+  }
 }

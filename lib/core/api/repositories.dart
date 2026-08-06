@@ -526,7 +526,23 @@ class CartRepository {
       remove(
     String cartItemId,
   ) async {
-    final cart = _unwrapCart(await _api.delete('/cart/remove/$cartItemId'));
+    final id = cartItemId.trim();
+    if (id.isEmpty || id == 'null' || id == 'undefined') {
+      throw ApiException('Invalid cart item id');
+    }
+    final cart = _unwrapCart(await _api.delete('/cart/remove/$id'));
+    final items = asList(cart['items']).map((e) => mapCartLine(asMap(e))).toList();
+    return (
+      items: items,
+      subtotal: asDouble(cart['subtotal']),
+      tax: asDouble(cart['tax']),
+      grandTotal: asDouble(cart['grandTotal'], asDouble(cart['subtotal'])),
+    );
+  }
+
+  Future<({List<CartLine> items, double subtotal, double tax, double grandTotal})>
+      clear() async {
+    final cart = _unwrapCart(await _api.delete('/cart/clear'));
     final items = asList(cart['items']).map((e) => mapCartLine(asMap(e))).toList();
     return (
       items: items,

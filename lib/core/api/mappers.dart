@@ -157,7 +157,7 @@ CartLine mapCartLine(Map<String, dynamic> line) {
     description: asString(item['description']) ?? '',
   );
   return CartLine(
-    cartItemId: asString(line['id']) ?? '',
+    cartItemId: asString(line['id']) ?? asString(line['_id']) ?? '',
     product: product,
     quantity: asInt(line['quantity'], 1),
     lineTotal: asDouble(line['subtotal'], product.price * asInt(line['quantity'], 1)),

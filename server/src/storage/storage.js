@@ -4,11 +4,24 @@
  * Replaceable object-storage abstraction.
  * LocalFileStorage is the default for development.
  * Swap `getStorage()` later for S3 / GCS / Azure without touching controllers.
+ *
+ * Production on Render: set UPLOADS_DIR to a persistent disk mount
+ * (e.g. /var/data/uploads). Without it, files live on the ephemeral
+ * filesystem and disappear on redeploy — MongoDB paths stay valid but
+ * GET /uploads/... returns 404.
  */
 
 const path = require('path');
 const fs = require('fs/promises');
 const crypto = require('crypto');
+
+/** Absolute uploads directory shared by static middleware + LocalFileStorage. */
+function resolveUploadsRoot() {
+  const fromEnv = String(process.env.UPLOADS_DIR || '').trim();
+  if (fromEnv) return path.resolve(fromEnv);
+  // Pin to server package root (…/server/uploads), not process.cwd().
+  return path.join(__dirname, '..', '..', 'uploads');
+}
 
 class LocalFileStorage {
   /**
@@ -88,7 +101,7 @@ let singleton = null;
 function getStorage() {
   if (!singleton) {
     singleton = new LocalFileStorage({
-      rootDir: path.join(process.cwd(), 'uploads'),
+      rootDir: resolveUploadsRoot(),
       publicBasePath: '/uploads',
     });
   }
@@ -107,4 +120,5 @@ module.exports = {
   LocalFileStorage,
   getStorage,
   setStorage,
+  resolveUploadsRoot,
 };

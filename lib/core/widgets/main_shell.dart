@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/cart/viewmodels/cart_viewmodel.dart';
 import '../theme/app_colors.dart';
 
 /// Bottom navigation shell: Home / Orders / Profile.
-class MainShell extends StatelessWidget {
+class MainShell extends ConsumerWidget {
   const MainShell({super.key, required this.navigationShell});
 
   final StatefulNavigationShell navigationShell;
@@ -17,7 +19,11 @@ class MainShell extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cartCount = ref.watch(
+      cartViewModelProvider.select((s) => s.totalQuantity),
+    );
+
     return Scaffold(
       body: navigationShell,
       bottomNavigationBar: NavigationBar(
@@ -45,7 +51,11 @@ class MainShell extends StatelessWidget {
           ? FloatingActionButton.extended(
               onPressed: () => context.push('/cart'),
               backgroundColor: AppColors.primary,
-              icon: const Icon(Icons.shopping_cart_outlined),
+              icon: Badge(
+                isLabelVisible: cartCount > 0,
+                label: Text('$cartCount'),
+                child: const Icon(Icons.shopping_cart_outlined),
+              ),
               label: const Text('Cart'),
             )
           : null,

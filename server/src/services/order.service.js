@@ -15,6 +15,7 @@ const {
   generateOrderNumber,
 } = require('../utils/pricing');
 const { formatItem } = require('./item.service');
+const inventoryEvents = require('./inventory.events');
 const logger = require('../config/logger');
 
 function formatNested(doc, fields) {
@@ -225,6 +226,13 @@ class OrderService {
         userId: auth.sub,
         orderNumber: order.orderNumber,
         reason: 'cancel',
+      });
+      inventoryEvents.publish({
+        reason: 'order_cancelled',
+        orderNumber: order.orderNumber,
+        stockIds: (order.items || [])
+          .map((line) => String(line.stock?._id || line.stock || ''))
+          .filter(Boolean),
       });
     }
 

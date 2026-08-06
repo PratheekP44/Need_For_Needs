@@ -1,23 +1,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Location for nearby locker distances (Phase 11.8). -->
+    <!-- Location: Android ≤11 BLE scan + nearby locker distances (Phase 11.8). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- BLE permissions (Phase 13 — TI CC2340R5 / FlutterBluePlus). -->
+    <!-- Legacy Bluetooth (Android ≤11 / API ≤30). -->
     <uses-permission
         android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
     <uses-permission
         android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
-    <!-- Android 12+ -->
+    <!-- Android 12+ (API 31+): Nearby devices — scan. -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
+    <!-- Android 12+ (API 31+): Nearby devices — connect / GATT. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <!-- ACCESS_FINE_LOCATION also declared above for Android ≤11 BLE scan. -->
+
     <uses-feature
         android:name="android.hardware.bluetooth_le"
         android:required="false" />

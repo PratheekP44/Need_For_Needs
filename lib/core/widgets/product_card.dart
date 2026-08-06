@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/cart/viewmodels/cart_viewmodel.dart';
 import '../data/models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
@@ -8,8 +10,17 @@ import 'image_placeholder.dart';
 import 'product_image.dart';
 import 'ui_kit.dart';
 
+/// Catalog stock minus units already in the local cart (optimistic).
+int displayStockFor(Product product, CartState cart) {
+  final reserved = cart.items
+      .where((line) => line.product.id == product.id)
+      .fold<int>(0, (sum, line) => sum + line.quantity);
+  final available = product.stock - reserved;
+  return available < 0 ? 0 : available;
+}
+
 /// Reusable product card used on Home, Locker Details, and grids.
-class ProductCard extends StatelessWidget {
+class ProductCard extends ConsumerWidget {
   const ProductCard({
     super.key,
     required this.product,
@@ -24,7 +35,10 @@ class ProductCard extends StatelessWidget {
   final double? width;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cart = ref.watch(cartViewModelProvider);
+    final stock = displayStockFor(product, cart);
+
     return SizedBox(
       width: width ?? 160,
       child: Material(
@@ -76,18 +90,14 @@ class ProductCard extends StatelessWidget {
                   PriceText(product.price),
                   const SizedBox(height: 2),
                   Text(
-                    product.stock < 1
-                        ? 'Out of stock'
-                        : '${product.stock} available',
+                    stock < 1 ? 'Out of stock' : '$stock available',
                     style: AppTextStyles.caption,
                   ),
                   const Spacer(),
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.tonal(
-                      onPressed: product.stock < 1
-                          ? null
-                          : onAddToCart,
+                      onPressed: stock < 1 ? null : onAddToCart,
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.surfaceMuted,
                         foregroundColor: AppColors.primary,
@@ -99,7 +109,7 @@ class ProductCard extends StatelessWidget {
                           color: AppColors.primary,
                         ),
                       ),
-                      child: Text(product.stock < 1 ? 'Out of stock' : 'Add to Cart'),
+                      child: Text(stock < 1 ? 'Out of stock' : 'Add to Cart'),
                     ),
                   ),
                 ],

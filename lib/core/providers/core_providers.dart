@@ -10,7 +10,7 @@ import '../payment/checkout_payment_service.dart';
 import '../services/app_service.dart';
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
-  return EnvConfig.development;
+  return EnvConfig.resolve();
 });
 
 final appServiceProvider = Provider<AppService>((ref) {
