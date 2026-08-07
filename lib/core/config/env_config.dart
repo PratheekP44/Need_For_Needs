@@ -26,15 +26,10 @@ class EnvConfig {
   const EnvConfig({
     required this.environment,
     required this.apiBaseUrl,
-    this.unlockJwtSecret = '',
   });
 
   final AppEnvironment environment;
   final String apiBaseUrl;
-
-  /// Dedicated Unlock JWT HS256 secret (`UNLOCK_JWT_SECRET`).
-  /// Must match the server value. Never reuse auth JWT secrets.
-  final String unlockJwtSecret;
 
   /// Alias for [apiBaseUrl] — used by media URL resolution and docs.
   String get baseUrl => apiBaseUrl;
@@ -47,11 +42,6 @@ class EnvConfig {
   static const String lanIp = String.fromEnvironment(
     'LAN_IP',
     defaultValue: '192.168.1.19',
-  );
-
-  /// Unlock JWT secret: `--dart-define=UNLOCK_JWT_SECRET=...`
-  static const String unlockJwtSecretDefine = String.fromEnvironment(
-    'UNLOCK_JWT_SECRET',
   );
 
   static const String webDevBaseUrl = 'http://127.0.0.1:5000';
@@ -68,7 +58,6 @@ class EnvConfig {
     return EnvConfig(
       environment: AppEnvironment.development,
       apiBaseUrl: url,
-      unlockJwtSecret: unlockJwtSecretDefine,
     );
   }
 
@@ -88,7 +77,6 @@ class EnvConfig {
     return EnvConfig(
       environment: AppEnvironment.production,
       apiBaseUrl: url,
-      unlockJwtSecret: unlockJwtSecretDefine,
     );
   }
 

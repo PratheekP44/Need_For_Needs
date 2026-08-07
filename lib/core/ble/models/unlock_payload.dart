@@ -2,9 +2,10 @@ import '../protocol/parsed_ble_response.dart';
 import '../transport/ble_log.dart';
 import '../unlock/unlock_jwt_decoder.dart';
 
-/// Unlock session built **only** from a verified Unlock JWT (Phase 15B).
+/// Unlock session built **only** from a decoded Unlock JWT (Phase 15B).
 ///
-/// Never constructed from loose HTTP fields, payment copies, or local defaults.
+/// Signature verification is server-side only. Flutter decodes claims over TLS,
+/// validates `exp` / `iat` locally, then maps into this model.
 class UnlockPayload {
   const UnlockPayload({
     required this.jwt,
@@ -42,15 +43,15 @@ class UnlockPayload {
 
   bool get isExpired => !expiry.toUtc().isAfter(DateTime.now().toUtc());
 
-  /// Decode + verify + validate Unlock JWT → [UnlockPayload].
+  /// Decode payload (no signature check) + validate time claims → [UnlockPayload].
   factory UnlockPayload.fromJwt(
     String token, {
-    required UnlockJwtDecoder decoder,
+    UnlockJwtDecoder decoder = const UnlockJwtDecoder(),
     DateTime? now,
   }) {
     late final Map<String, dynamic> claims;
     try {
-      claims = decoder.decodeAndVerify(token);
+      claims = decoder.decodeClaims(token);
     } on UnlockJwtException {
       rethrow;
     } catch (e) {
@@ -68,6 +69,9 @@ class UnlockPayload {
         reason: 'malformed',
       );
     }
+
+    final clock = (now ?? DateTime.now()).toUtc();
+    _validateExpAndIat(claims, clock: clock);
 
     final jti = _requireString(claims, 'jti');
     final orderId = _requireString(claims, 'orderId');
@@ -102,9 +106,67 @@ class UnlockPayload {
       itemId: itemId,
     );
 
-    payload.validateExpiration(now: now);
+    payload.validateExpiration(now: clock);
     payload.validateForUnlock(checkExpiry: false);
     return payload;
+  }
+
+  /// Local time checks on standard JWT `exp` / `iat` (no signature verify).
+  static void _validateExpAndIat(
+    Map<String, dynamic> claims, {
+    required DateTime clock,
+  }) {
+    final nowUnix = clock.millisecondsSinceEpoch ~/ 1000;
+
+    final exp = _asUnixSeconds(claims['exp']);
+    if (exp == null) {
+      BleLog.e('Unlock JWT rejected: missing exp');
+      throw const UnlockJwtException(
+        'Unlock JWT missing required claim: exp',
+        reason: 'missing_field',
+      );
+    }
+    if (exp <= nowUnix) {
+      BleLog.e('Unlock JWT rejected: exp in the past');
+      throw UnlockJwtException(
+        'Unlock JWT expired (exp=$exp)',
+        reason: 'expired',
+      );
+    }
+
+    final iat = _asUnixSeconds(claims['iat']);
+    if (iat == null) {
+      BleLog.e('Unlock JWT rejected: missing iat');
+      throw const UnlockJwtException(
+        'Unlock JWT missing required claim: iat',
+        reason: 'missing_field',
+      );
+    }
+    // Allow small clock skew (60s) for devices slightly ahead.
+    if (iat > nowUnix + 60) {
+      BleLog.e('Unlock JWT rejected: iat in the future');
+      throw UnlockJwtException(
+        'Unlock JWT issuedAt/iat is in the future (iat=$iat)',
+        reason: 'malformed',
+      );
+    }
+    if (iat > exp) {
+      BleLog.e('Unlock JWT rejected: iat after exp');
+      throw const UnlockJwtException(
+        'Unlock JWT iat is after exp',
+        reason: 'malformed',
+      );
+    }
+  }
+
+  static int? _asUnixSeconds(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is int) return raw > 1000000000000 ? raw ~/ 1000 : raw;
+    if (raw is num) {
+      final n = raw.toInt();
+      return n > 1000000000000 ? n ~/ 1000 : n;
+    }
+    return int.tryParse(raw.toString().trim());
   }
 
   void validateExpiration({DateTime? now}) {

@@ -2,15 +2,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:need_for_needs/core/ble/models/unlock_payload.dart';
 import 'package:need_for_needs/core/ble/unlock/unlock_jwt_decoder.dart';
 
-const _secret = 'test_unlock_jwt_secret_min_32_chars!!';
-
 void main() {
-  final decoder = UnlockJwtDecoder(secret: _secret);
+  const decoder = UnlockJwtDecoder();
   final expiry = DateTime.now().toUtc().add(const Duration(minutes: 10));
   final issuedAt = DateTime.now().toUtc();
 
-  Map<String, dynamic> sampleClaims({DateTime? expires}) {
+  Map<String, dynamic> sampleClaims({DateTime? expires, DateTime? issued}) {
     final exp = expires ?? expiry;
+    final iat = issued ?? issuedAt;
     return {
       'typ': 'unlock',
       'jti': 'jti-prod-001',
@@ -25,53 +24,41 @@ void main() {
       'lockerId': 'LCK-02',
       'boxId': 'BOX-03',
       'itemId': 'ITEM-9',
-      'issuedAt': issuedAt.toIso8601String(),
+      'issuedAt': iat.toIso8601String(),
       'expiry': exp.toIso8601String(),
+      'iat': iat.millisecondsSinceEpoch ~/ 1000,
       'exp': exp.millisecondsSinceEpoch ~/ 1000,
     };
   }
 
-  String signed([Map<String, dynamic>? claims]) =>
-      UnlockJwtDecoder.signForTest(
-        claims: claims ?? sampleClaims(),
-        secret: _secret,
-      );
+  String forged([Map<String, dynamic>? claims]) =>
+      UnlockJwtDecoder.forgeForTest(claims ?? sampleClaims());
 
   group('UnlockJwtDecoder', () {
-    test('accepts valid HS256 signature', () {
-      final claims = decoder.decodeAndVerify(signed());
+    test('decodes claims without signature verification', () {
+      final claims = decoder.decodeClaims(forged());
       expect(claims['jti'], 'jti-prod-001');
       expect(claims['port'], 3);
     });
 
-    test('rejects invalid signature', () {
-      final bad = UnlockJwtDecoder.signForTest(
-        claims: sampleClaims(),
-        secret: 'wrong_secret_wrong_secret_wrong_!!',
-      );
-      expect(
-        () => decoder.decodeAndVerify(bad),
-        throwsA(
-          isA<UnlockJwtException>().having(
-            (e) => e.reason,
-            'reason',
-            'signature',
-          ),
-        ),
-      );
+    test('does not require a signing secret', () {
+      // Different fake signatures still decode — client does not verify.
+      final a = UnlockJwtDecoder.forgeForTest(sampleClaims());
+      final b = '${a.substring(0, a.lastIndexOf('.'))}.othersig';
+      expect(decoder.decodeClaims(a)['jti'], decoder.decodeClaims(b)['jti']);
     });
 
     test('rejects malformed token', () {
       expect(
-        () => decoder.decodeAndVerify('not.a.jwt'),
+        () => decoder.decodeClaims('not-a-jwt'),
         throwsA(isA<UnlockJwtException>()),
       );
     });
   });
 
   group('UnlockPayload.fromJwt', () {
-    test('builds UnlockPayload only from verified JWT claims', () {
-      final jwt = signed();
+    test('builds UnlockPayload only from decoded JWT claims', () {
+      final jwt = forged();
       final payload = UnlockPayload.fromJwt(jwt, decoder: decoder);
 
       expect(payload.jwt, jwt);
@@ -91,7 +78,7 @@ void main() {
     });
 
     test('toUnlockPacketRequest uses JWT fields only', () {
-      final payload = UnlockPayload.fromJwt(signed(), decoder: decoder);
+      final payload = UnlockPayload.fromJwt(forged(), decoder: decoder);
       final request = payload.toUnlockPacketRequest();
       expect(request.collectionToken, payload.unlockToken);
       expect(request.port, payload.port);
@@ -101,8 +88,8 @@ void main() {
       expect(request.authPayload?['jwt'], payload.jwt);
     });
 
-    test('rejects expired JWT', () {
-      final jwt = signed(
+    test('rejects expired JWT via exp', () {
+      final jwt = forged(
         sampleClaims(
           expires: DateTime.now().toUtc().subtract(const Duration(minutes: 1)),
         ),
@@ -115,10 +102,21 @@ void main() {
       );
     });
 
+    test('rejects missing iat', () {
+      final claims = sampleClaims()..remove('iat');
+      expect(
+        () => UnlockPayload.fromJwt(forged(claims), decoder: decoder),
+        throwsA(
+          isA<UnlockJwtException>()
+              .having((e) => e.reason, 'reason', 'missing_field'),
+        ),
+      );
+    });
+
     test('rejects missing required claim', () {
       final claims = sampleClaims()..remove('unlockToken');
       expect(
-        () => UnlockPayload.fromJwt(signed(claims), decoder: decoder),
+        () => UnlockPayload.fromJwt(forged(claims), decoder: decoder),
         throwsA(
           isA<UnlockJwtException>()
               .having((e) => e.reason, 'reason', 'missing_field'),
@@ -129,7 +127,7 @@ void main() {
     test('rejects empty bluetoothAddress (no fallback)', () {
       final claims = sampleClaims()..['bluetoothAddress'] = '';
       expect(
-        () => UnlockPayload.fromJwt(signed(claims), decoder: decoder),
+        () => UnlockPayload.fromJwt(forged(claims), decoder: decoder),
         throwsA(isA<UnlockJwtException>()),
       );
     });

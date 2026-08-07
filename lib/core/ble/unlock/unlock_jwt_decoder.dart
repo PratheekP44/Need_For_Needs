@@ -1,10 +1,8 @@
 import 'dart:convert';
 
-import 'package:crypto/crypto.dart';
-
 import '../transport/ble_log.dart';
 
-/// Errors while decoding / verifying an Unlock JWT.
+/// Errors while decoding an Unlock JWT payload.
 class UnlockJwtException implements Exception {
   const UnlockJwtException(this.message, {this.reason = 'invalid'});
 
@@ -15,31 +13,22 @@ class UnlockJwtException implements Exception {
   String toString() => message;
 }
 
-/// Decodes and HS256-verifies Unlock JWTs using [UNLOCK_JWT_SECRET].
+/// Decodes Unlock JWT payloads without verifying the signature.
 ///
-/// Phone verifies integrity before building [UnlockPayload]. Replay consume
-/// still happens on the backend via `jti` hooks.
+/// The signing secret (`UNLOCK_JWT_SECRET`) lives only on the backend.
+/// Flutter trusts the TLS-authenticated API response and validates `exp`/`iat`
+/// locally before building [UnlockPayload].
 class UnlockJwtDecoder {
-  const UnlockJwtDecoder({required this.secret});
+  const UnlockJwtDecoder();
 
-  /// Dedicated unlock signing secret (`UNLOCK_JWT_SECRET`). Never the auth secret.
-  final String secret;
-
-  /// Verifies signature, returns claims map.
-  Map<String, dynamic> decodeAndVerify(String token) {
+  /// Base64url-decodes the JWT payload segment → claims map.
+  Map<String, dynamic> decodeClaims(String token) {
     final jwt = token.trim();
     if (jwt.isEmpty) {
       BleLog.e('Unlock JWT rejected: empty');
       throw const UnlockJwtException(
         'Unlock JWT is empty',
         reason: 'malformed',
-      );
-    }
-    if (secret.isEmpty) {
-      BleLog.e('Unlock JWT rejected: UNLOCK_JWT_SECRET not configured');
-      throw const UnlockJwtException(
-        'UNLOCK_JWT_SECRET is not configured on the client',
-        reason: 'config',
       );
     }
 
@@ -49,16 +38,6 @@ class UnlockJwtDecoder {
       throw const UnlockJwtException(
         'Unlock JWT must have three base64url segments',
         reason: 'malformed',
-      );
-    }
-
-    final signingInput = '${parts[0]}.${parts[1]}';
-    final expected = _hs256Base64Url(signingInput, secret);
-    if (!_constantTimeEquals(expected, parts[2])) {
-      BleLog.e('Unlock JWT rejected: signature invalid');
-      throw const UnlockJwtException(
-        'Unlock JWT signature invalid',
-        reason: 'signature',
       );
     }
 
@@ -87,26 +66,6 @@ class UnlockJwtDecoder {
     return claims;
   }
 
-  /// Alias kept for call sites that only need verified claims.
-  Map<String, dynamic> decodeClaims(String token) => decodeAndVerify(token);
-
-  static String _hs256Base64Url(String signingInput, String secret) {
-    final hmac = Hmac(sha256, utf8.encode(secret));
-    final digest = hmac.convert(utf8.encode(signingInput));
-    return base64Url.encode(digest.bytes).replaceAll('=', '');
-  }
-
-  static bool _constantTimeEquals(String a, String b) {
-    final left = a.replaceAll('=', '');
-    final right = b.replaceAll('=', '');
-    if (left.length != right.length) return false;
-    var diff = 0;
-    for (var i = 0; i < left.length; i++) {
-      diff |= left.codeUnitAt(i) ^ right.codeUnitAt(i);
-    }
-    return diff == 0;
-  }
-
   static List<int> _base64UrlDecode(String input) {
     var normalized = input.replaceAll('-', '+').replaceAll('_', '/');
     final mod = normalized.length % 4;
@@ -116,17 +75,13 @@ class UnlockJwtDecoder {
     return base64.decode(normalized);
   }
 
-  /// Test helper: forge a compact HS256 Unlock JWT.
-  static String signForTest({
-    required Map<String, dynamic> claims,
-    required String secret,
-  }) {
+  /// Test helper: compact JWT with unsigned signature segment.
+  static String forgeForTest(Map<String, dynamic> claims) {
     final header = base64Url
-        .encode(utf8.encode(jsonEncode({'alg': 'HS256', 'typ': 'JWT'})))
+        .encode(utf8.encode(jsonEncode({'alg': 'none', 'typ': 'JWT'})))
         .replaceAll('=', '');
     final payload =
         base64Url.encode(utf8.encode(jsonEncode(claims))).replaceAll('=', '');
-    final sig = _hs256Base64Url('$header.$payload', secret);
-    return '$header.$payload.$sig';
+    return '$header.$payload.fakesig';
   }
 }

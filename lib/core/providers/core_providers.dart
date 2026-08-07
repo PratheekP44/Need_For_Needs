@@ -66,10 +66,7 @@ final paymentRepositoryProvider = Provider<PaymentRepository>((ref) {
 });
 
 final unlockPayloadRepositoryProvider = Provider<UnlockPayloadRepository>((ref) {
-  return UnlockPayloadRepository(
-    ref.watch(apiClientProvider),
-    config: ref.watch(envConfigProvider),
-  );
+  return UnlockPayloadRepository(ref.watch(apiClientProvider));
 });
 
 final unlockPayloadServiceProvider = Provider<UnlockPayloadService>((ref) {

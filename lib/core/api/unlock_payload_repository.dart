@@ -1,6 +1,5 @@
 import '../ble/models/unlock_payload.dart';
 import '../ble/unlock/unlock_jwt_decoder.dart';
-import '../config/env_config.dart';
 import '../location/location_service.dart';
 import 'api_client.dart';
 
@@ -8,17 +7,17 @@ import 'api_client.dart';
 ///
 /// `POST /orders/:orderId/unlock-payload` → ApiClient unwraps `data` to `{ jwt }`.
 /// Unlock fields are never read from the HTTP envelope.
+/// Signature verification is backend-only — Flutter only decodes claims.
 class UnlockPayloadRepository {
   UnlockPayloadRepository(
     this._api, {
-    required EnvConfig config,
-    UnlockJwtDecoder? decoder,
-  }) : decoder = decoder ?? UnlockJwtDecoder(secret: config.unlockJwtSecret);
+    this.decoder = const UnlockJwtDecoder(),
+  });
 
   final ApiClient _api;
   final UnlockJwtDecoder decoder;
 
-  /// Requests JWT and builds [UnlockPayload] solely from verified claims.
+  /// Requests JWT and builds [UnlockPayload] from decoded claims.
   Future<UnlockPayload> fetch({required String orderId}) async {
     final jwt = await fetchJwt(orderId: orderId);
     return UnlockPayload.fromJwt(jwt, decoder: decoder);
@@ -35,16 +34,12 @@ class UnlockPayloadRepository {
       await _api.post('/orders/${Uri.encodeComponent(id)}/unlock-payload'),
     );
 
-    // Reject any attempt to use sibling unlock fields from the HTTP body.
     final jwt = asString(data['jwt']);
     if (jwt == null || jwt.trim().isEmpty) {
       throw const UnlockJwtException(
         'Unlock API returned no jwt (expected data.jwt only)',
         reason: 'malformed',
       );
-    }
-    if (data.keys.any((k) => k != 'jwt')) {
-      // Tolerate envelope noise keys but never use them for UnlockPayload.
     }
     return jwt.trim();
   }
