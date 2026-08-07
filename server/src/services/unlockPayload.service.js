@@ -226,7 +226,6 @@ class UnlockPayloadService {
       unlockJwt = jwt.sign(claims, unlockJwtSecret, {
         algorithm: 'HS256',
         expiresIn: ttlSeconds,
-        jwtid: jti,
       });
     } catch (error) {
       logger.error('Unlock JWT sign failed (raw)', {
