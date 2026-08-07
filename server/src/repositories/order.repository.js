@@ -35,6 +35,34 @@ class OrderRepository {
     return this.findByOrderNumber(idOrNumber);
   }
 
+  /**
+   * Order load for unlock-payload: includes locker BLE device + box numbers.
+   */
+  async findByIdOrOrderNumberForUnlock(idOrNumber) {
+    const populateUnlock = (query) =>
+      query
+        .populate({
+          path: 'locker',
+          select: 'lockerId lockerName status terminalNumber BLEDevice',
+          populate: {
+            path: 'BLEDevice',
+            select: 'macAddress deviceName advertisementId status firmwareVersion',
+          },
+        })
+        .populate('items.item', 'itemId name')
+        .populate('items.stock', 'stockId')
+        .populate('items.box', 'boxId boxNumber status')
+        .populate('items.locker', 'lockerId lockerName status');
+
+    if (/^[a-fA-F0-9]{24}$/.test(String(idOrNumber))) {
+      const byId = await populateUnlock(Order.findById(idOrNumber)).exec();
+      if (byId) return byId;
+    }
+    return populateUnlock(
+      Order.findOne({ orderNumber: String(idOrNumber).toUpperCase() }),
+    ).exec();
+  }
+
   async list({ filter, sort, skip, limit }) {
     const [items, total] = await Promise.all([
       Order.find(filter)

@@ -48,4 +48,13 @@ router.put(
   orderController.cancelOrder,
 );
 
+router.post(
+  '/orders/:id/unlock-payload',
+  authenticate,
+  authorize('user', 'admin'),
+  orderIdParamValidator,
+  validate,
+  orderController.issueUnlockPayload,
+);
+
 module.exports = router;

@@ -21,6 +21,7 @@ function loadEnv() {
 
   const accessSecret = process.env.JWT_ACCESS_SECRET;
   const refreshSecret = process.env.JWT_REFRESH_SECRET;
+  const unlockJwtSecret = process.env.UNLOCK_JWT_SECRET;
   const mongoUri = String(process.env.MONGODB_URI || '')
     .trim()
     .replace(/^['"]|['"]$/g, '');
@@ -29,6 +30,10 @@ function loadEnv() {
     throw new Error(
       'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be set in the environment',
     );
+  }
+
+  if (!unlockJwtSecret) {
+    throw new Error('UNLOCK_JWT_SECRET must be set in the environment');
   }
 
   if (!mongoUri) {
@@ -46,6 +51,10 @@ function loadEnv() {
     logLevel: process.env.LOG_LEVEL || 'info',
     jwtAccessSecret: accessSecret,
     jwtRefreshSecret: refreshSecret,
+    /** Dedicated secret for Unlock JWTs — never reuse auth secrets. */
+    unlockJwtSecret,
+    /** Unlock JWT lifetime in seconds (default 10 minutes). */
+    unlockJwtTtlSeconds: Number(process.env.UNLOCK_JWT_TTL_SECONDS) || 10 * 60,
     jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
     jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
     bcryptSaltRounds: Number(process.env.BCRYPT_SALT_ROUNDS) || 12,

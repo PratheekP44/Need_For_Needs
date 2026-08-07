@@ -9,6 +9,7 @@ import '../models/locker_connection.dart';
 import '../models/locker_state.dart';
 import '../models/packet.dart';
 import '../transport/ble_transport.dart';
+import '../unlock/unlock_service.dart';
 
 /// Transport selection: Virtual MCU (dev) vs Real BLE (CC2340).
 enum BleTransportMode {
@@ -54,6 +55,11 @@ final lockerServiceProvider = Provider<LockerService>((ref) {
     unawaited(service.dispose());
   });
   return service;
+});
+
+/// Phase 14 Collect → unlock orchestrator.
+final unlockServiceProvider = Provider<UnlockService>((ref) {
+  return UnlockService(locker: ref.watch(lockerServiceProvider));
 });
 
 /// Bluetooth adapter state stream.

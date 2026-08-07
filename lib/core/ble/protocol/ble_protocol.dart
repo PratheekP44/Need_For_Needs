@@ -8,7 +8,9 @@ import '../managers/timeout_manager.dart';
 import '../models/packet.dart';
 import '../models/packet_payload.dart';
 import '../models/packet_result.dart';
+import '../transport/ble_log.dart';
 import 'packet_codec.dart';
+import 'packet_parser.dart';
 import 'packet_types.dart';
 
 /// Packet layer — encode/decode, validate, sequence, retry, timeout.
@@ -18,16 +20,20 @@ class BleProtocol {
   BleProtocol({
     required this.connection,
     PacketCodec? codec,
+    PacketParser? packetParser,
     SequenceManager? sequenceManager,
     RetryManager? retryManager,
     TimeoutManager? timeoutManager,
   })  : _codec = codec ?? const PacketCodec(),
         sequence = sequenceManager ?? SequenceManager(),
         retry = retryManager ?? RetryManager(),
-        timeouts = timeoutManager ?? const TimeoutManager();
+        timeouts = timeoutManager ?? const TimeoutManager() {
+    _parser = packetParser ?? PacketParser(codec: _codec);
+  }
 
   final ConnectionManager connection;
   final PacketCodec _codec;
+  late final PacketParser _parser;
 
   /// Exposed for tests and advanced orchestration.
   final SequenceManager sequence;
@@ -51,9 +57,15 @@ class BleProtocol {
   }
 
   void _onNotification(Uint8List raw) {
+    final hex = raw
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join(' ');
+    BleLog.d('Packet Received (HEX) length=${raw.length} HEX=$hex');
     try {
       final packet = _codec.decode(raw);
       sequence.acceptInbound(packet.header.sequenceNumber);
+      final parsed = _parser.parsePacket(packet);
+      BleLog.d('Decoded Response: $parsed');
       _packetController.add(packet);
 
       final pending = _pending;
@@ -67,8 +79,12 @@ class BleProtocol {
         pending.complete(packet);
       }
     } catch (error) {
+      BleLog.e('Unexpected packet / decode failure', error);
+      final soft = _parser.parse(raw);
+      BleLog.d('Decoded Response (fallback): $soft');
       final pending = _pending;
       if (pending != null && !pending.isCompleted) {
+        // Still complete with error so exchange can retry / fail cleanly.
         pending.completeError(error);
       }
     }
@@ -98,6 +114,7 @@ class BleProtocol {
     required String lockerId,
     required String boxId,
     required String collectionToken,
+    int? port,
     PacketPayload? payload,
   }) {
     return exchange(
@@ -111,6 +128,7 @@ class BleProtocol {
           PacketPayload.auth(
             tokenExpiresAt: null,
             phoneNonce: DateTime.now().millisecondsSinceEpoch.toString(),
+            port: port,
           ),
     );
   }
@@ -120,6 +138,7 @@ class BleProtocol {
     required String lockerId,
     required String boxId,
     required String collectionToken,
+    int? port,
   }) {
     return exchange(
       type: BlePacketType.openBox,
@@ -128,7 +147,7 @@ class BleProtocol {
       lockerId: lockerId,
       boxId: boxId,
       collectionToken: collectionToken,
-      payload: PacketPayload.openBox(),
+      payload: PacketPayload.openBox(port: port),
     );
   }
 
@@ -270,8 +289,52 @@ class BleProtocol {
     _expectedSeq = request.header.sequenceNumber;
 
     try {
-      await connection.write(encode(request));
-      return await completer.future.timeout(timeout);
+      final bytes = encode(request);
+      final port = request.payload.asJsonMap()?['port'];
+      final hex = bytes
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join(' ');
+      BleLog.d('── BLE WRITE (${request.packetType.wireName}) ─────────');
+      BleLog.d('Locker ID: ${request.header.lockerId}');
+      BleLog.d('Box Number: ${request.header.boxId}');
+      if (port != null) BleLog.d('Port Number: $port');
+      BleLog.d('Packet Length: ${bytes.length}');
+      BleLog.d('Packet HEX: $hex');
+      BleLog.d(
+        'Byte[0]=ver Byte[1]=type Byte[2..3]=seq (RESERVED) '
+        'Byte[4..7]=timestamp — port lives in JSON payload, not header',
+      );
+      for (var i = 0; i < bytes.length && i < 16; i++) {
+        final note = switch (i) {
+          0 => ' protocolVersion',
+          1 => ' packetType',
+          2 => ' seq_hi (NOT port)',
+          3 => ' seq_lo (NOT port)',
+          4 => ' timestamp…',
+          _ => '',
+        };
+        BleLog.d(
+          'Byte[$i] = 0x${bytes[i].toRadixString(16).padLeft(2, '0')} '
+          '(${bytes[i]})$note',
+        );
+      }
+      if (port != null) {
+        BleLog.d('PORT = $port');
+        BleLog.d('BOX = ${request.header.boxId}');
+        BleLog.d('TX HEX: $hex');
+      }
+      BleLog.d(
+        'Packet Sent (${request.packetType.wireName}) '
+        'length=${bytes.length} HEX=$hex',
+      );
+      await connection.write(bytes);
+      BleLog.d('Write confirmation OK');
+      return await completer.future.timeout(timeout, onTimeout: () {
+        BleLog.e('Timeout waiting for ${expect.wireName}');
+        throw TimeoutException(
+          'Notification timeout waiting for ${expect.wireName}',
+        );
+      });
     } finally {
       if (identical(_pending, completer)) {
         _pending = null;

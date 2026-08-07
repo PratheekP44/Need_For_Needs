@@ -27,7 +27,12 @@ class BleConfig {
     this.connectRetryAttempts = 3,
     this.discoverTimeout = const Duration(seconds: 8),
     this.writeTimeout = const Duration(seconds: 15),
-    this.writeSpacing = const Duration(milliseconds: 100),
+    this.writeSpacing = Duration.zero,
+    this.postConnectSettle = Duration.zero,
+    this.postMtuSettle = Duration.zero,
+    this.postDiscoverSettle = Duration.zero,
+    this.postNotifySettle = Duration.zero,
+    this.writeRetryAttempts = 3,
     this.rssiPollInterval = const Duration(seconds: 2),
     this.useVirtualMcuTransport = true,
     this.useMockTransport = false,
@@ -69,8 +74,32 @@ class BleConfig {
   final Duration discoverTimeout;
   final Duration writeTimeout;
 
-  /// Delay before each characteristic write (Java `sleep(100)` parity).
+  /// Delay before each characteristic write.
+  ///
+  /// Java `sleep(100)` is between successive writes, not before the first
+  /// AUTH after CCCD. Default **zero** so AUTH beats firmware idle timeout.
   final Duration writeSpacing;
+
+  /// Optional settle after Connected before Request MTU.
+  /// Default **zero** — Java proceeds on the Connected callback.
+  final Duration postConnectSettle;
+
+  /// Optional settle after MTU callback before Discover.
+  /// Default **zero** — Java proceeds on `onMtuChanged`.
+  final Duration postMtuSettle;
+
+  /// Optional settle after discovery before Enable Notify.
+  /// Default **zero** — Java proceeds on `onServicesDiscovered`.
+  final Duration postDiscoverSettle;
+
+  /// Optional settle after CCCD before AUTH write.
+  /// Default **zero** — Java writes AUTH immediately after descriptor success.
+  /// Non-zero values risk firmware idle disconnect (~5s).
+  final Duration postNotifySettle;
+
+  /// Retries for characteristic write on Android GATT 133.
+  final int writeRetryAttempts;
+
   final Duration rssiPollInterval;
 
   /// Prefer [VirtualMCUTransport] (software CC2340 stand-in).
@@ -124,9 +153,18 @@ class BleConfig {
         useVirtualMcuTransport: false,
         useMockTransport: false,
         desiredMtu: 512,
+        // Allow ATT MTU-sized command frames (declared Char1 len is 100;
+        // negotiated MTU may permit larger writes on real silicon).
+        commandCharacteristicMaxBytes: 512,
         connectTimeout: const Duration(seconds: 10),
         connectRetryAttempts: 3,
         autoReconnect: true,
+        postConnectSettle: Duration.zero,
+        postMtuSettle: Duration.zero,
+        postDiscoverSettle: Duration.zero,
+        postNotifySettle: Duration.zero,
+        writeRetryAttempts: 3,
+        writeSpacing: Duration.zero,
       );
 
   BleConfig copyWith({
@@ -146,6 +184,11 @@ class BleConfig {
     Duration? discoverTimeout,
     Duration? writeTimeout,
     Duration? writeSpacing,
+    Duration? postConnectSettle,
+    Duration? postMtuSettle,
+    Duration? postDiscoverSettle,
+    Duration? postNotifySettle,
+    int? writeRetryAttempts,
     Duration? rssiPollInterval,
     bool? useVirtualMcuTransport,
     bool? useMockTransport,
@@ -175,6 +218,11 @@ class BleConfig {
       discoverTimeout: discoverTimeout ?? this.discoverTimeout,
       writeTimeout: writeTimeout ?? this.writeTimeout,
       writeSpacing: writeSpacing ?? this.writeSpacing,
+      postConnectSettle: postConnectSettle ?? this.postConnectSettle,
+      postMtuSettle: postMtuSettle ?? this.postMtuSettle,
+      postDiscoverSettle: postDiscoverSettle ?? this.postDiscoverSettle,
+      postNotifySettle: postNotifySettle ?? this.postNotifySettle,
+      writeRetryAttempts: writeRetryAttempts ?? this.writeRetryAttempts,
       rssiPollInterval: rssiPollInterval ?? this.rssiPollInterval,
       useVirtualMcuTransport:
           useVirtualMcuTransport ?? this.useVirtualMcuTransport,

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import '../config/ble_config.dart';
 import '../models/ble_device.dart';
 import '../transport/ble_log.dart';
+import '../transport/ble_pipeline_timer.dart';
 import '../transport/ble_transport.dart';
 import '../transport/flutter_blue_transport.dart';
 
@@ -33,11 +34,13 @@ class ConnectionManager {
   StreamSubscription<bool>? _connectionSub;
   bool _reconnecting = false;
   bool _pipelineBusy = false;
+  BlePipelineTimer? _timer;
 
   BleDevice? get currentDevice => _current;
   bool get isConnected => transport.isConnected;
   bool get isReconnecting => _reconnecting;
   int get reconnectAttempts => _reconnectAttempts;
+  BlePipelineTimer? get lastPipelineTimer => _timer;
 
   Stream<bool> get connectionStream => transport.connectionStream;
   Stream<int> get rssiStream => transport.rssiStream;
@@ -60,8 +63,15 @@ class ConnectionManager {
     }
     _pipelineBusy = true;
     try {
+      _timer = BlePipelineTimer();
+      final t = transport;
+      if (t is FlutterBlueTransport) {
+        t.pipelineTimer = _timer;
+      }
+      _timer!.mark('CONNECT_BEGIN');
       BleLog.d('ConnectionManager.connect ${device.id}');
       await transport.connect(device, timeout: config.connectTimeout);
+      _timer!.mark('CONNECT_ESTABLISHED');
       _current = device;
       _reconnectAttempts = 0;
       _reconnecting = false;
@@ -73,14 +83,61 @@ class ConnectionManager {
   }
 
   Future<void> _postConnectPipeline() async {
+    final timer = _timer;
+    // Java BleHandler: proceed on each GATT callback — no fixed sleeps.
+    // Artificial settles risk firmware idle disconnect (~5s).
+    await _maybeSettle(config.postConnectSettle, 'SETTLE_POST_CONNECT', timer);
+
+    timer?.mark('MTU_REQUEST_START');
+    BleLog.d('PIPELINE step=RequestMTU desired=${config.desiredMtu}');
     final mtu = await transport.requestMtu(config.desiredMtu);
-    BleLog.d('Post-connect MTU=$mtu');
+    timer?.mark('MTU_COMPLETE mtu=$mtu');
+    await _maybeSettle(config.postMtuSettle, 'SETTLE_POST_MTU', timer);
+
+    timer?.mark('DISCOVER_START');
+    BleLog.d('PIPELINE step=DiscoverServices');
     await transport.discoverServices();
+    timer?.mark('SERVICES_DISCOVERED');
+    await _maybeSettle(config.postDiscoverSettle, 'SETTLE_POST_DISCOVER', timer);
+
+    timer?.mark('NOTIFY_ENABLE_START');
+    BleLog.d('PIPELINE step=EnableNotifyC4');
     await transport.enableNotifications();
+    timer?.mark('NOTIFY_ENABLED');
+    // CRITICAL: do not delay here — AUTH must follow immediately (Java parity).
+    await _maybeSettle(config.postNotifySettle, 'SETTLE_POST_NOTIFY', timer);
+
     final t = transport;
-    if (t is FlutterBlueTransport && !t.linkState.isReady) {
-      throw StateError('BT not ready after pipeline: ${t.linkState}');
+    if (t is FlutterBlueTransport) {
+      BleLog.d(
+        'PIPELINE Ready connected=${t.isConnected} mtu=${t.lastMtu} '
+        'services=${t.pipelineServicesFound} '
+        'chars=${t.pipelineCharacteristicsFound} '
+        'notify=${t.pipelineNotifyEnabled} '
+        'link=${t.linkState} t=${timer?.elapsedMs}ms',
+      );
+      if (!t.linkState.isReady) {
+        throw StateError('BT not ready after pipeline: ${t.linkState}');
+      }
+      // RSSI only after setup — concurrent readRssi during write → GATT 133.
+      t.startRssiPollingAfterReady();
     }
+    timer?.mark('READY_FOR_AUTH_WRITE');
+    BleLog.d(
+      'PIPELINE step=ReadyForWriteAUTH_C1 t=${timer?.elapsedMs}ms '
+      '(AUTH should fire immediately — no post-notify sleep)',
+    );
+  }
+
+  Future<void> _maybeSettle(
+    Duration delay,
+    String label,
+    BlePipelineTimer? timer,
+  ) async {
+    if (delay <= Duration.zero) return;
+    BleLog.d('PIPELINE artificial settle $label ${delay.inMilliseconds}ms');
+    await Future<void>.delayed(delay);
+    timer?.mark(label);
   }
 
   Future<void> disconnect({bool suppressAutoReconnect = true}) async {
@@ -132,7 +189,14 @@ class ConnectionManager {
         final device = _current;
         if (device == null) return;
         _pipelineBusy = true;
+        _timer = BlePipelineTimer();
+        final t = transport;
+        if (t is FlutterBlueTransport) {
+          t.pipelineTimer = _timer;
+        }
+        _timer!.mark('RECONNECT_BEGIN');
         await transport.connect(device, timeout: config.connectTimeout);
+        _timer!.mark('CONNECT_ESTABLISHED');
         await _postConnectPipeline();
         _reconnecting = false;
         onReconnected?.call();

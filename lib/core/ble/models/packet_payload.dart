@@ -18,11 +18,13 @@ class PacketPayload {
     int? tokenIssuedAt,
     int? tokenExpiresAt,
     String? phoneNonce,
+    int? port,
   }) =>
       PacketPayload.json({
         'tokenIssuedAt': tokenIssuedAt,
         'tokenExpiresAt': tokenExpiresAt,
         'phoneNonce': phoneNonce,
+        if (port != null) 'port': port,
       });
 
   factory PacketPayload.authAck({
@@ -36,8 +38,14 @@ class PacketPayload {
         'firmwareVersion': firmwareVersion,
       });
 
-  factory PacketPayload.openBox({String reason = 'collection'}) =>
-      PacketPayload.json({'reason': reason});
+  factory PacketPayload.openBox({
+    String reason = 'collection',
+    int? port,
+  }) =>
+      PacketPayload.json({
+        'reason': reason,
+        if (port != null) 'port': port,
+      });
 
   factory PacketPayload.openAck({
     required bool opened,

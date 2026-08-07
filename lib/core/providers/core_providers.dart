@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_client.dart';
 import '../api/auth_debug.dart';
 import '../api/repositories.dart';
+import '../api/unlock_payload_repository.dart';
+import '../ble/models/unlock_payload.dart';
+import '../ble/unlock/unlock_payload_service.dart';
 import '../config/env_config.dart';
 import '../data/models.dart';
 import '../location/location_service.dart';
@@ -62,6 +65,17 @@ final paymentRepositoryProvider = Provider<PaymentRepository>((ref) {
   return PaymentRepository(ref.watch(apiClientProvider));
 });
 
+final unlockPayloadRepositoryProvider = Provider<UnlockPayloadRepository>((ref) {
+  return UnlockPayloadRepository(
+    ref.watch(apiClientProvider),
+    config: ref.watch(envConfigProvider),
+  );
+});
+
+final unlockPayloadServiceProvider = Provider<UnlockPayloadService>((ref) {
+  return UnlockPayloadService(ref.watch(unlockPayloadRepositoryProvider));
+});
+
 final checkoutPaymentServiceProvider = Provider<CheckoutPaymentService>((ref) {
   return CheckoutPaymentService(
     orders: ref.watch(orderRepositoryProvider),
@@ -81,6 +95,22 @@ class LastPaymentNotifier extends Notifier<OrderPaymentResult?> {
 final lastPaymentResultProvider =
     NotifierProvider<LastPaymentNotifier, OrderPaymentResult?>(
   LastPaymentNotifier.new,
+);
+
+/// Stored backend unlock payload for the active Collect session.
+class UnlockPayloadNotifier extends Notifier<UnlockPayload?> {
+  @override
+  UnlockPayload? build() => null;
+
+  // ignore: use_setters_to_change_properties
+  void setPayload(UnlockPayload? value) => state = value;
+
+  void clear() => state = null;
+}
+
+final lastUnlockPayloadProvider =
+    NotifierProvider<UnlockPayloadNotifier, UnlockPayload?>(
+  UnlockPayloadNotifier.new,
 );
 
 class AuthSessionState {

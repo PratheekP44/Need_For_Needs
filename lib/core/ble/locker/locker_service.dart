@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:virtual_mcu/virtual_mcu.dart';
 
 import '../config/ble_config.dart';
+import '../managers/ble_connection_manager.dart';
 import '../managers/connection_manager.dart';
 import '../models/ble_device.dart';
 import '../models/locker_connection.dart';
@@ -10,6 +11,7 @@ import '../models/locker_state.dart';
 import '../models/packet_result.dart';
 import '../protocol/ble_protocol.dart';
 import '../protocol/packet_types.dart';
+import '../protocol/parsed_ble_response.dart';
 import '../transport/ble_transport.dart';
 import '../transport/flutter_blue_transport.dart';
 import '../transport/mock_ble_transport.dart';
@@ -85,6 +87,7 @@ class LockerService {
   BleConfig get config => _config;
   BleProtocol get protocol => _protocol;
   BleTransport get transport => _transport;
+  ConnectionManager get connectionManager => _connection;
 
   /// Shared Virtual MCU when [VirtualMCUTransport] is active; otherwise null.
   MCUCore? get virtualMcu {
@@ -149,6 +152,7 @@ class LockerService {
     required String lockerId,
     required String boxId,
     required String collectionToken,
+    int? port,
   }) async {
     _validateTokenFormat(collectionToken);
     _snapshot = _snapshot.copyWith(
@@ -159,11 +163,13 @@ class LockerService {
     _setState(LockerState.authenticating);
     _setState(LockerState.waitingResponse);
 
+    final resolvedPort = port ?? _portFromBoxId(boxId);
     final result = await _protocol.authenticate(
       orderId: orderId,
       lockerId: lockerId,
       boxId: boxId,
       collectionToken: collectionToken,
+      port: resolvedPort,
     );
 
     if (!result.success) {
@@ -196,6 +202,7 @@ class LockerService {
     required String lockerId,
     required String boxId,
     required String collectionToken,
+    int? port,
   }) async {
     if (!_snapshot.authenticated && _state != LockerState.authenticated) {
       return PacketResult.failure(
@@ -206,11 +213,13 @@ class LockerService {
     _setState(LockerState.opening);
     _setState(LockerState.waitingResponse);
 
+    final resolvedPort = port ?? _portFromBoxId(boxId);
     final result = await _protocol.openBox(
       orderId: orderId,
       lockerId: lockerId,
       boxId: boxId,
       collectionToken: collectionToken,
+      port: resolvedPort,
     );
 
     if (!result.success) {
@@ -308,12 +317,15 @@ class LockerService {
     required String lockerId,
     required String boxId,
     required String collectionToken,
+    int? port,
     BleDevice? device,
   }) async {
-    final target = device ??
-        (_nearby.isNotEmpty
-            ? _nearby.first
-            : (await scanForLockers()).firstOrNull);
+    final ble = BleConnectionManager(connection: _connection, config: _config);
+    BleDevice? target = device;
+    if (target == null) {
+      final scanned = _nearby.isNotEmpty ? _nearby : await scanForLockers();
+      target = ble.selectLockerDevice(scanned);
+    }
     if (target == null) {
       _setState(LockerState.failure, error: 'No locker found');
       return PacketResult.failure(message: 'No locker found');
@@ -325,6 +337,7 @@ class LockerService {
       lockerId: lockerId,
       boxId: boxId,
       collectionToken: collectionToken,
+      port: port,
     );
     if (!auth.success) return auth;
 
@@ -333,6 +346,7 @@ class LockerService {
       lockerId: lockerId,
       boxId: boxId,
       collectionToken: collectionToken,
+      port: port,
     );
   }
 
@@ -351,6 +365,15 @@ class LockerService {
     }
   }
 
+  /// Box N → Port N when [port] is not supplied explicitly.
+  static int? _portFromBoxId(String boxId) {
+    try {
+      return UnlockPacketRequest.portFromBoxId(boxId);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> dispose() async {
     await disconnectSafely();
     await _protocol.dispose();
@@ -363,6 +386,3 @@ class LockerService {
   }
 }
 
-extension _FirstOrNull<E> on List<E> {
-  E? get firstOrNull => isEmpty ? null : first;
-}

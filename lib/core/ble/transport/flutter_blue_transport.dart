@@ -11,6 +11,7 @@ import '../config/ble_config.dart';
 import '../models/ble_device.dart';
 import 'ble_link_state.dart';
 import 'ble_log.dart';
+import 'ble_pipeline_timer.dart';
 import 'ble_transport.dart';
 
 /// Snapshot of a discovered GATT service (debug / BLE Test screen).
@@ -41,6 +42,9 @@ class GattCharacteristicInfo {
   final bool isSecondaryWrite;
 }
 
+/// Which write characteristic to use (Java C1 token vs C3 command).
+enum BleWriteTarget { c1, c3 }
+
 /// Real BLE transport backed by `flutter_blue_plus` for TI CC2340R5.
 ///
 /// Production hardening inspired by SmartAAP [BleHandler] (connect retries,
@@ -66,6 +70,7 @@ class FlutterBlueTransport implements BleTransport {
   BluetoothDevice? _device;
   BluetoothCharacteristic? _writeChar;
   BluetoothCharacteristic? _notifyChar;
+  BluetoothCharacteristic? _secondaryWriteChar;
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
   StreamSubscription<List<int>>? _notifySub;
@@ -96,6 +101,11 @@ class FlutterBlueTransport implements BleTransport {
 
   /// Secondary WRITE characteristic found during last GATT discovery.
   bool hasSecondaryWriteCharacteristic = false;
+
+  /// Pipeline stopwatch (set by [ConnectionManager] for timing reports).
+  BlePipelineTimer? pipelineTimer;
+
+  bool _firstAuthWriteLogged = false;
 
   /// Pipeline status strings for the BLE Debug screen.
   bool pipelineConnected = false;
@@ -461,6 +471,7 @@ class FlutterBlueTransport implements BleTransport {
     pipelineServicesFound = false;
     pipelineCharacteristicsFound = false;
     pipelineNotifyEnabled = false;
+    _firstAuthWriteLogged = false;
     hasSecondaryWriteCharacteristic = false;
 
     final remote = BluetoothDevice.fromId(device.id);
@@ -521,7 +532,8 @@ class FlutterBlueTransport implements BleTransport {
           }
         }
 
-        _startRssiPolling();
+        // Do NOT start RSSI here — concurrent GATT ops during
+        // MTU/discover/notify/first-write cause Android status 133.
         return;
       } catch (e) {
         lastError = e;
@@ -560,6 +572,16 @@ class FlutterBlueTransport implements BleTransport {
     });
   }
 
+  /// Called by [ConnectionManager] only after notify CCCD succeeds.
+  void startRssiPollingAfterReady() {
+    if (!_link.notificationsEnabled || !_connected) {
+      BleLog.d('RSSI polling skipped — link not ready');
+      return;
+    }
+    BleLog.d('RSSI polling start (post-pipeline)');
+    _startRssiPolling();
+  }
+
   void _stopRssiPolling() {
     _rssiTimer?.cancel();
     _rssiTimer = null;
@@ -586,6 +608,7 @@ class FlutterBlueTransport implements BleTransport {
     }
     _writeChar = null;
     _notifyChar = null;
+    _secondaryWriteChar = null;
     discoveredServices = const [];
     lastMtu = null;
     connectedAt = null;
@@ -595,6 +618,7 @@ class FlutterBlueTransport implements BleTransport {
     pipelineServicesFound = false;
     pipelineCharacteristicsFound = false;
     pipelineNotifyEnabled = false;
+    _firstAuthWriteLogged = false;
     _setLink(const BleLinkState());
     _connectionController.add(false);
   }
@@ -603,19 +627,24 @@ class FlutterBlueTransport implements BleTransport {
   Future<int> requestMtu(int mtu) async {
     final d = _device;
     if (d == null) return 23;
-    // Java requests 512; accept whatever the stack negotiates.
+    // Java requests 512; FBP applies ~350ms predelay internally.
     final requested = mtu < 23 ? 23 : mtu;
-    BleLog.d('Request MTU $requested');
+    BleLog.d('PIPELINE RequestMTU $requested (await callback)');
+    final timer = pipelineTimer;
+    // FBP default predelay=0.35s avoids Android auto-MTU race (required).
+    // Do not add extra settles on top — idle budget is ~5s.
     try {
-      final negotiated = await d.requestMtu(requested);
+      final negotiated = await d.requestMtu(requested, predelay: 0.35);
       lastMtu = negotiated;
       _setFlag(BleLinkFlags.mtuSet);
-      BleLog.d('MTU negotiated=$negotiated');
+      BleLog.d(
+        'PIPELINE WaitMtuCallback done negotiated=$negotiated '
+        't=${timer?.elapsedMs}ms',
+      );
       return negotiated;
     } catch (e) {
       BleLog.d('MTU request failed (using fallback): $e');
       lastMtu ??= 23;
-      // Still mark set so pipeline can continue on stacks that manage MTU.
       _setFlag(BleLinkFlags.mtuSet);
       return lastMtu!;
     }
@@ -709,11 +738,13 @@ class FlutterBlueTransport implements BleTransport {
     }
     _writeChar = write;
     _notifyChar = notify;
+    _secondaryWriteChar = secondaryWrite;
     pipelineCharacteristicsFound = true;
     _setFlag(BleLinkFlags.servicesDiscovered);
     BleLog.d(
       'PIPELINE Characteristics Found=YES '
-      'Char1=yes Char4=yes SecWrite=${secondaryWrite != null}',
+      'C1=${write.uuid.str} C4=${notify.uuid.str} '
+      'C3=${secondaryWrite?.uuid.str ?? 'missing'}',
     );
   }
 
@@ -730,25 +761,24 @@ class FlutterBlueTransport implements BleTransport {
   @override
   Future<void> enableNotifications() async {
     final c = _notifyChar;
-    if (c == null) throw StateError('Status characteristic (Char 4) missing');
+    if (c == null) throw StateError('Status characteristic (Char 4 / C4) missing');
     if (!c.properties.notify && !c.properties.indicate) {
       throw StateError(
         'Status characteristic does not support NOTIFY/INDICATE',
       );
     }
 
-    BleLog.d('Enable notifications on ${c.uuid.str}');
+    BleLog.d('PIPELINE EnableNotifyC4 uuid=${c.uuid.str}');
+    // FBP awaits onDescriptorWritten for CCCD 0x2902 — Java parity.
     await c.setNotifyValue(true);
 
-    // Java writes CCCD 0x2902 explicitly. FBP setNotifyValue does this;
-    // verify the descriptor exists for diagnostics.
     try {
       final descriptors = c.descriptors;
       final cccd = descriptors.where((d) => _guidEquals(d.uuid, _cccdUuid));
       if (cccd.isEmpty) {
-        BleLog.d('CCCD 0x2902 not listed — relying on setNotifyValue');
+        BleLog.d('CCCD 0x2902 not listed — setNotifyValue completed anyway');
       } else {
-        BleLog.d('CCCD 0x2902 present');
+        BleLog.d('CCCD 0x2902 present — descriptor write success awaited');
       }
     } catch (e) {
       BleLog.d('CCCD check skipped: $e');
@@ -765,22 +795,95 @@ class FlutterBlueTransport implements BleTransport {
     _setFlag(BleLinkFlags.notificationsEnabled);
     pipelineNotifyEnabled = true;
     BleLog.d('BT Ready (notifications on)');
-    BleLog.d('PIPELINE Notify Enabled=YES');
+    BleLog.d('PIPELINE Notify Enabled=YES (descriptor write success)');
+  }
+
+  void _logWriteDiagnostics({
+    required BluetoothCharacteristic c,
+    required Uint8List bytes,
+    required String role,
+    required bool withoutResponse,
+  }) {
+    final hex = bytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join(' ');
+    BleLog.d('── WRITE PREFLIGHT ──────────────────────────────');
+    BleLog.d('Connected state: $_connected (link=${_link.isConnected})');
+    BleLog.d('MTU: ${lastMtu ?? 'not negotiated'}');
+    BleLog.d('Current characteristic UUID: ${c.uuid.str}');
+    BleLog.d('Characteristic properties: ${_propsLabel(c.properties)}');
+    BleLog.d('Characteristic used: $role');
+    BleLog.d('Services discovered: $pipelineServicesFound '
+        '(count=${discoveredServices.length})');
+    for (final s in discoveredServices) {
+      BleLog.d('  Service ${s.uuid}');
+      for (final ch in s.characteristics) {
+        BleLog.d('    ${ch.uuid} ${ch.properties}'
+            '${ch.isCommand ? ' [C1]' : ''}'
+            '${ch.isSecondaryWrite ? ' [C3]' : ''}'
+            '${ch.isStatus ? ' [C4]' : ''}');
+      }
+    }
+    BleLog.d('Notification enabled: $pipelineNotifyEnabled '
+        '(flag=${_link.notificationsEnabled})');
+    BleLog.d('Link ready: ${_link.isReady}');
+    BleLog.d('Packet length: ${bytes.length}');
+    BleLog.d('Packet HEX: $hex');
+    BleLog.d('Write type: ${withoutResponse ? 'WRITE_NO_RESP' : 'WRITE'}');
+    BleLog.d('────────────────────────────────────────────────');
   }
 
   @override
   Future<void> write(Uint8List bytes, {bool withoutResponse = false}) async {
-    final c = _writeChar;
-    if (c == null) throw StateError('Command characteristic (Char 1) missing');
-    if (!_connected) throw StateError('Not connected');
+    await writeTo(BleWriteTarget.c1, bytes, withoutResponse: withoutResponse);
+  }
 
-    final maxLen = config.commandCharacteristicMaxBytes;
-    // Prefer ATT MTU-3 when negotiated higher than declared char length.
-    final attPayload = (lastMtu != null && lastMtu! > 3) ? lastMtu! - 3 : maxLen;
-    final hardMax = attPayload < maxLen ? attPayload : maxLen;
+  /// Write to C1 (AUTH / Phase 10) or C3 (command) — Java dual-char path.
+  Future<void> writeTo(
+    BleWriteTarget target,
+    Uint8List bytes, {
+    bool withoutResponse = false,
+  }) async {
+    if (!_connected) throw StateError('Not connected');
+    if (!_link.notificationsEnabled || !pipelineNotifyEnabled) {
+      throw StateError(
+        'Write blocked — notifications not enabled yet '
+        '(Java: wait descriptor write before AUTH). '
+        'notify=$pipelineNotifyEnabled link=${_link.notificationsEnabled}',
+      );
+    }
+    if (!_link.servicesDiscovered || !pipelineCharacteristicsFound) {
+      throw StateError('Write blocked — services not discovered');
+    }
+
+    final c = switch (target) {
+      BleWriteTarget.c1 => _writeChar,
+      BleWriteTarget.c3 => _secondaryWriteChar,
+    };
+    if (c == null) {
+      throw StateError(
+        target == BleWriteTarget.c1
+            ? 'C1 write characteristic missing'
+            : 'C3 command characteristic missing',
+      );
+    }
+
+    final negotiatedPayload =
+        (lastMtu != null && lastMtu! > 3) ? lastMtu! - 3 : 20;
+    final declaredMax = config.commandCharacteristicMaxBytes;
+    final hardMax =
+        negotiatedPayload < declaredMax ? negotiatedPayload : declaredMax;
     if (bytes.length > hardMax) {
       throw StateError(
-        'Command packet ${bytes.length} bytes exceeds write max ($hardMax)',
+        'Packet ${bytes.length} bytes exceeds write max ($hardMax) '
+        'mtu=${lastMtu ?? 'null'} declaredMax=$declaredMax — '
+        'GATT would fail; aborting before writeCharacteristic',
+      );
+    }
+    if (bytes.length > 100) {
+      BleLog.d(
+        'WARNING packet ${bytes.length}B > firmware Char1 declared 100B '
+        '(proceeding if MTU allows; watch for GATT 133)',
       );
     }
 
@@ -791,13 +894,14 @@ class FlutterBlueTransport implements BleTransport {
         : (!canWrite && canWriteNoResp);
 
     if (!canWrite && !canWriteNoResp) {
-      throw StateError('Command characteristic is not writable');
+      throw StateError('Characteristic ${c.uuid.str} is not writable');
     }
 
-    // Serialize writes — Java waits for S_DATA_WRITTEN before next setData.
     final job = _WriteJob(
       bytes: bytes,
       withoutResponse: useWithoutResponse,
+      characteristic: c,
+      role: target == BleWriteTarget.c1 ? 'C1' : 'C3',
       completer: Completer<void>(),
     );
     _writeQueue.addLast(job);
@@ -823,41 +927,108 @@ class FlutterBlueTransport implements BleTransport {
     } finally {
       _writePumpRunning = false;
       if (_writeQueue.isNotEmpty) {
-        // A write was enqueued while we were finishing — continue.
         unawaited(_pumpWriteQueue());
       }
     }
   }
 
   Future<void> _performWrite(_WriteJob job) async {
-    final c = _writeChar;
-    if (c == null) throw StateError('Command characteristic (Char 1) missing');
+    final c = job.characteristic;
     if (!_connected) throw StateError('Not connected');
 
     _clearFlag(BleLinkFlags.dataWritten);
     _setFlag(BleLinkFlags.busy);
-    BleLog.tx('${job.bytes.length}B withoutResponse=${job.withoutResponse} '
-        '${_hexPreview(job.bytes)}');
 
-    // Small inter-write delay like Java sleep(100) before setValue.
-    await Future<void>.delayed(config.writeSpacing);
+    final maxAttempts = config.writeRetryAttempts.clamp(1, 5);
+    Object? lastError;
+    final isFirstAppWrite = !_firstAuthWriteLogged;
 
-    await c
-        .write(
-          job.bytes,
-          withoutResponse: job.withoutResponse,
-          timeout: config.writeTimeout.inSeconds.clamp(1, 60),
-        )
-        .timeout(
-          config.writeTimeout,
-          onTimeout: () => throw TimeoutException(
-            'Write timed out after ${config.writeTimeout}',
-          ),
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (isFirstAppWrite && attempt == 1) {
+        _firstAuthWriteLogged = true;
+        pipelineTimer?.mark('FIRST_AUTH_WRITE_START role=${job.role}');
+        BleLog.d(
+          'FIRST_AUTH_WRITE at t=${pipelineTimer?.elapsedMs ?? -1}ms '
+          'after CONNECT (must be << 5000ms firmware idle)',
         );
+      }
+      _logWriteDiagnostics(
+        c: c,
+        bytes: job.bytes,
+        role: job.role,
+        withoutResponse: job.withoutResponse,
+      );
+      BleLog.d(
+        'WRITE attempt $attempt/$maxAttempts role=${job.role} '
+        'len=${job.bytes.length} t=${pipelineTimer?.elapsedMs}ms',
+      );
 
-    txPacketCount += 1;
-    _setFlag(BleLinkFlags.dataWritten);
+      // Java sleep(100) is between successive writes — skip before first AUTH.
+      if (!isFirstAppWrite && config.writeSpacing > Duration.zero) {
+        await Future<void>.delayed(config.writeSpacing);
+      } else if (isFirstAppWrite) {
+        BleLog.d('WRITE skip writeSpacing on first AUTH (idle-timeout safe)');
+      }
+
+      try {
+        await c
+            .write(
+              job.bytes,
+              withoutResponse: job.withoutResponse,
+              timeout: config.writeTimeout.inSeconds.clamp(1, 60),
+            )
+            .timeout(
+              config.writeTimeout,
+              onTimeout: () => throw TimeoutException(
+                'Write timed out after ${config.writeTimeout}',
+              ),
+            );
+
+        txPacketCount += 1;
+        _setFlag(BleLinkFlags.dataWritten);
+        _clearFlag(BleLinkFlags.busy);
+        if (isFirstAppWrite && attempt == 1) {
+          pipelineTimer?.mark('FIRST_AUTH_WRITE_SUCCESS');
+          pipelineTimer?.report(
+            headline:
+                'First AUTH write completed — compare vs ~5000ms idle budget',
+          );
+        }
+        BleLog.d(
+          'WRITE SUCCESS role=${job.role} uuid=${c.uuid.str} '
+          'len=${job.bytes.length} t=${pipelineTimer?.elapsedMs}ms',
+        );
+        return;
+      } catch (e) {
+        lastError = e;
+        final is133 = _isGatt133(e);
+        BleLog.e(
+          'WRITE FAILED role=${job.role} attempt=$attempt/$maxAttempts '
+          'gatt133=$is133 t=${pipelineTimer?.elapsedMs}ms',
+          e,
+        );
+        if (isFirstAppWrite) {
+          pipelineTimer?.mark('FIRST_AUTH_WRITE_FAILED attempt=$attempt');
+          pipelineTimer?.report(
+            headline: 'First AUTH write FAILED — timing dump',
+          );
+        }
+        if (is133 && attempt < maxAttempts) {
+          final backoff = Duration(milliseconds: 300 * attempt);
+          BleLog.d('GATT 133 on write — retry after $backoff');
+          await Future<void>.delayed(backoff);
+          continue;
+        }
+        break;
+      }
+    }
+
     _clearFlag(BleLinkFlags.busy);
+    _fail('Write Fail [${job.role}]: $lastError');
+    throw StateError(
+      'writeCharacteristic failed [${job.role}] after $maxAttempts '
+      'attempts: $lastError',
+    );
   }
 
   String _hexPreview(Uint8List bytes, {int max = 24}) {
@@ -909,10 +1080,14 @@ class _WriteJob {
   _WriteJob({
     required this.bytes,
     required this.withoutResponse,
+    required this.characteristic,
+    required this.role,
     required this.completer,
   });
 
   final Uint8List bytes;
   final bool withoutResponse;
+  final BluetoothCharacteristic characteristic;
+  final String role;
   final Completer<void> completer;
 }

@@ -1,14 +1,19 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/ble/ble.dart';
+import '../../../core/data/models.dart';
+import '../../../core/payment/checkout_payment_service.dart';
 import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/widgets/page_scaffold.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
-import '../../../core/widgets/ux.dart';
 
 class PaymentSuccessScreen extends ConsumerStatefulWidget {
   const PaymentSuccessScreen({super.key});
@@ -121,11 +126,113 @@ class _PaymentSuccessScreenState extends ConsumerState<PaymentSuccessScreen>
   }
 }
 
-class CollectItemScreen extends ConsumerWidget {
+class CollectItemScreen extends ConsumerStatefulWidget {
   const CollectItemScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CollectItemScreen> createState() => _CollectItemScreenState();
+}
+
+class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
+  bool _busy = false;
+  String _stage = '';
+  String? _error;
+  bool _opened = false;
+
+  Future<void> _openLocker({
+    required OrderPaymentResult? payment,
+    required OrderSummary? order,
+  }) async {
+    if (_busy) return;
+
+    // Order id only — unlock fields come from backend UnlockPayload.
+    final orderId = payment?.orderId.isNotEmpty == true
+        ? payment!.orderId
+        : (payment?.orderNumber.isNotEmpty == true
+            ? payment!.orderNumber
+            : (order?.id ?? ''));
+
+    if (orderId.isEmpty) {
+      setState(() {
+        _error =
+            'Missing order id. Complete payment again or open a Ready order.';
+      });
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+      _opened = false;
+      _stage = 'Requesting unlock payload…';
+    });
+
+    try {
+      // Collect uses real radio on Android; Virtual MCU elsewhere for bring-up.
+      if (!kIsWeb && Platform.isAndroid) {
+        ref.read(bleConfigProvider.notifier).useRealBle();
+      }
+
+      final payloadService = ref.read(unlockPayloadServiceProvider);
+      final payload = await payloadService.requestPayload(orderId: orderId);
+      ref.read(lastUnlockPayloadProvider.notifier).setPayload(payload);
+
+      setState(() => _stage = 'Scanning for LKRM-V2…');
+
+      final unlock = ref.read(unlockServiceProvider);
+      // BLE layer consumes only the backend UnlockPayload (via PacketRequest).
+      final request = payloadService.toPacketRequest(payload);
+
+      // Progress labels from locker state stream while unlock runs.
+      final sub = ref.read(lockerServiceProvider).stateStream.listen((s) {
+        if (!mounted) return;
+        setState(() {
+          _stage = switch (s) {
+            LockerState.scanning => 'Scanning…',
+            LockerState.connecting => 'Connecting…',
+            LockerState.connected => 'Connected — discovering GATT…',
+            LockerState.authenticating => 'Sending AUTH packet…',
+            LockerState.waitingResponse => 'Waiting for locker response…',
+            LockerState.authenticated => 'Authenticated — unlocking…',
+            LockerState.opening => 'Sending unlock packet…',
+            LockerState.success => 'Locker Opened Successfully',
+            LockerState.reconnecting => 'Reconnect…',
+            LockerState.failure => 'Unlock failed',
+            LockerState.disconnected => _stage,
+          };
+        });
+      });
+
+      final result = await unlock.unlock(request);
+      await sub.cancel();
+
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _opened = result.success;
+        _stage = result.success
+            ? 'Locker Opened Successfully'
+            : (result.message ?? 'Unlock failed (${result.stage})');
+        _error = result.success ? null : result.message;
+      });
+
+      if (result.success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Locker Opened Successfully')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.toString();
+        _stage = 'Error';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final payment = ref.watch(lastPaymentResultProvider);
     final orders = ref.watch(_latestOrderProvider);
 
@@ -146,13 +253,24 @@ class CollectItemScreen extends ConsumerWidget {
         final boxes = payment?.boxes.isNotEmpty == true
             ? payment!.boxes
             : (order?.boxes ?? const <String>[]);
+        final hasOrder = orderIdForUnlock(payment, order).isNotEmpty;
 
         return PageScaffold(
           title: 'Collect item',
           bottom: PrimaryButton(
-            label: 'Open Locker',
-            icon: Icons.lock_open_rounded,
-            onPressed: () => showComingSoon(context, 'BLE locker unlock'),
+            label: _busy
+                ? 'Working…'
+                : _opened
+                    ? 'Opened'
+                    : 'Open Locker',
+            icon: _busy
+                ? Icons.hourglass_top
+                : _opened
+                    ? Icons.check_circle
+                    : Icons.lock_open_rounded,
+            onPressed: _busy || _opened || !hasOrder
+                ? null
+                : () => _openLocker(payment: payment, order: order),
           ),
           body: ListView(
             children: [
@@ -170,7 +288,8 @@ class CollectItemScreen extends ConsumerWidget {
                     const SizedBox(height: 4),
                     Text(
                       lockerName,
-                      style: AppTextStyles.body.copyWith(color: AppColors.muted),
+                      style: AppTextStyles.body
+                          .copyWith(color: AppColors.muted),
                     ),
                   ],
                 ),
@@ -202,9 +321,46 @@ class CollectItemScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 24),
               SoftPanel(
-                child: Text(
-                  'Stand near the locker and tap Open Locker. BLE pairing will be added in a later phase.',
-                  style: AppTextStyles.body.copyWith(color: AppColors.muted),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _opened
+                          ? 'Locker Opened Successfully. Retrieve your items and close the door.'
+                          : 'Stand near LKRM-V2 and tap Open Locker. '
+                              'The app requests an unlock payload from the server, '
+                              'then connects over BLE, writes the packet, and waits '
+                              'for the locker response.',
+                      style: AppTextStyles.body.copyWith(
+                        color: _opened ? AppColors.success : AppColors.muted,
+                      ),
+                    ),
+                    if (_stage.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      if (_busy)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 8),
+                          child: LinearProgressIndicator(),
+                        ),
+                      Text(_stage, style: AppTextStyles.label),
+                    ],
+                    if (!hasOrder) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'No order id available — unlock cannot start.',
+                        style: AppTextStyles.caption
+                            .copyWith(color: AppColors.error),
+                      ),
+                    ],
+                    if (_error != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _error!,
+                        style: AppTextStyles.caption
+                            .copyWith(color: AppColors.error),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],
@@ -220,3 +376,10 @@ final _latestOrderProvider = FutureProvider((ref) async {
   final orders = await ref.read(orderRepositoryProvider).list();
   return orders.isEmpty ? null : orders.first;
 });
+
+/// Prefer mongo order id, then order number, then latest order id.
+String orderIdForUnlock(OrderPaymentResult? payment, OrderSummary? order) {
+  if (payment?.orderId.isNotEmpty == true) return payment!.orderId;
+  if (payment?.orderNumber.isNotEmpty == true) return payment!.orderNumber;
+  return order?.id ?? '';
+}

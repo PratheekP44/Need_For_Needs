@@ -39,9 +39,22 @@ const cancelOrder = asyncHandler(async (req, res) => {
   });
 });
 
+const unlockPayloadService = require('../services/unlockPayload.service');
+
+const issueUnlockPayload = asyncHandler(async (req, res) => {
+  const result = await unlockPayloadService.issue(req.auth, req.params.id);
+  // Production contract: envelope data contains only the signed Unlock JWT.
+  res.status(200).json({
+    success: true,
+    message: 'Unlock JWT issued successfully',
+    data: { jwt: result.jwt },
+  });
+});
+
 module.exports = {
   checkout,
   listOrders,
   getOrder,
   cancelOrder,
+  issueUnlockPayload,
 };
