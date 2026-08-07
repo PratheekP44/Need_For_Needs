@@ -6,7 +6,6 @@ const orderRepository = require('../repositories/order.repository');
 const AppError = require('../utils/AppError');
 const { loadEnv } = require('../config/env');
 const { issueCollectionToken } = require('./admin.service');
-const { createTokenId } = require('../utils/token');
 const logger = require('../config/logger');
 
 /**
@@ -187,7 +186,7 @@ class UnlockPayloadService {
       null;
     const itemId = rawItemId != null ? String(rawItemId) : null;
 
-    const jti = createTokenId() || crypto.randomUUID();
+    const jti = crypto.randomUUID();
 
     const claims = {
       typ: 'unlock',
@@ -207,16 +206,36 @@ class UnlockPayloadService {
       expiry: expiry.toISOString(),
     };
 
+    const unlockJwtSecret = config.unlockJwtSecret;
+
+    // Temporary diagnostics — do not log secret value.
+    logger.info('Unlock JWT sign preflight', {
+      typeofUnlockJwtSecret: typeof unlockJwtSecret,
+      unlockJwtSecretLength:
+        typeof unlockJwtSecret === 'string' ? unlockJwtSecret.length : null,
+      typeofJti: typeof jti,
+      jti,
+      typeofTtlSeconds: typeof ttlSeconds,
+      ttlSeconds,
+      typeofClaims: typeof claims,
+      claimKeys: Object.keys(claims),
+    });
+
     let unlockJwt;
     try {
-      unlockJwt = jwt.sign(claims, config.unlockJwtSecret, {
+      unlockJwt = jwt.sign(claims, unlockJwtSecret, {
         algorithm: 'HS256',
         expiresIn: ttlSeconds,
         jwtid: jti,
       });
     } catch (error) {
-      logger.error('Unlock JWT sign failed', { message: error.message });
-      throw new AppError('Failed to sign unlock JWT', 500);
+      logger.error('Unlock JWT sign failed (raw)', {
+        name: error?.name,
+        message: error?.message,
+        stack: error?.stack,
+      });
+      // Temporary: surface the original jwt.sign error (do not wrap).
+      throw error;
     }
 
     this._recordIssuedJti(jti, {
