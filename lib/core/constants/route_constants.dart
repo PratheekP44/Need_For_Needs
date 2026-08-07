@@ -31,5 +31,6 @@ class RouteConstants {
   static const String adminOrders = '/admin/orders';
   static const String adminVirtualMcu = '/admin/virtual-mcu';
   static const String adminBleDebug = '/admin/ble-debug';
+  static const String adminBleDemo = '/admin/ble-demo';
   static const String bleDebug = '/ble-debug';
 }

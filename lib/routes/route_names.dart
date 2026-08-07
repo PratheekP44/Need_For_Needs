@@ -31,5 +31,6 @@ class RouteNames {
   static const String adminOrders = 'adminOrders';
   static const String adminVirtualMcu = 'adminVirtualMcu';
   static const String adminBleDebug = 'adminBleDebug';
+  static const String adminBleDemo = 'adminBleDemo';
   static const String bleDebug = 'bleDebug';
 }

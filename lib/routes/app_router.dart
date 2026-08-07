@@ -9,6 +9,7 @@ import '../core/widgets/main_shell.dart';
 import '../features/admin/screens/admin_dashboard_screen.dart';
 import '../features/auth/screens/splash_screen.dart';
 import '../features/ble_debug/screens/ble_debug_screen.dart';
+import '../features/ble_demo/screens/ble_demo_screen.dart';
 import '../features/cart/screens/cart_screen.dart';
 import '../features/developer_dashboard/screens/developer_dashboard_screen.dart';
 import '../features/home/screens/home_screen.dart';
@@ -267,6 +268,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: RouteConstants.adminBleDebug,
         name: RouteNames.adminBleDebug,
         builder: (context, state) => const BleDebugScreen(),
+      ),
+      GoRoute(
+        path: RouteConstants.adminBleDemo,
+        name: RouteNames.adminBleDemo,
+        builder: (context, state) => const BleDemoScreen(),
       ),
     ],
   );

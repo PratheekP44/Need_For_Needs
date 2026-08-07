@@ -268,6 +268,11 @@ class AdminDashboardScreen extends ConsumerWidget {
                     label: 'BLE Debug (Phase 13A)',
                     onTap: () => context.push(RouteConstants.adminBleDebug),
                   ),
+                  _AdminAction(
+                    icon: Icons.developer_mode_rounded,
+                    label: 'BLE Demo',
+                    onTap: () => context.push(RouteConstants.adminBleDemo),
+                  ),
                 ],
               ),
             ),
