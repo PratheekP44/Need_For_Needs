@@ -1,6 +1,8 @@
 'use strict';
 
 const Order = require('../models/Order');
+// Register BLEDevice before nested populate of locker.BLEDevice.
+require('../models/BLEDevice');
 
 class OrderRepository {
   async create(data) {
@@ -46,6 +48,7 @@ class OrderRepository {
           select: 'lockerId lockerName status terminalNumber BLEDevice',
           populate: {
             path: 'BLEDevice',
+            model: 'BLEDevice',
             select: 'macAddress deviceName advertisementId status firmwareVersion',
           },
         })

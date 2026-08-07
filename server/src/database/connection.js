@@ -93,6 +93,11 @@ async function connectDatabase(mongoUri) {
     `MongoDB connected successfully (${mongoose.connection.host}/${mongoose.connection.name})`,
   );
 
+  // Register all schemas (incl. BLEDevice) so populate refs never hit
+  // MissingSchemaError for pluralized names like "BLEDevices".
+  require('../models');
+  logger.info(`Mongoose models registered: ${mongoose.modelNames().join(', ')}`);
+
   return mongoose.connection;
 }
 

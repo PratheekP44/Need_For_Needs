@@ -3,6 +3,11 @@
 const mongoose = require('mongoose');
 const { LOCKER_STATUSES } = require('./enums');
 
+// Ensure referenced model is registered before any populate('BLEDevice').
+// Without this, Mongoose looks up a pluralized name ("BLEDevices") and throws
+// MissingSchemaError.
+require('./BLEDevice');
+
 const lockerSchema = new mongoose.Schema(
   {
     lockerId: {
