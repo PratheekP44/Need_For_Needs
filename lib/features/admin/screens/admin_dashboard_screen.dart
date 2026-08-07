@@ -306,6 +306,62 @@ class _AdminAction extends StatelessWidget {
 class AdminLockerManagementScreen extends ConsumerWidget {
   const AdminLockerManagementScreen({super.key});
 
+  Future<void> _editTerminal(BuildContext context, WidgetRef ref, Locker locker) async {
+    final controller = TextEditingController(
+      text: locker.terminalNumber?.toString() ?? '',
+    );
+    final value = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Terminal — ${locker.name}'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Terminal number (1–255)',
+            helperText: 'Physical locker controller id',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final n = int.tryParse(controller.text.trim());
+              if (n == null || n < 1 || n > 255) {
+                showAppSnackBar(ctx, 'Enter an integer from 1 to 255');
+                return;
+              }
+              Navigator.of(ctx).pop(n);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (value == null || !context.mounted) return;
+    try {
+      await ref.read(lockerRepositoryProvider).update(
+            locker.id,
+            terminalNumber: value,
+          );
+      await ref.read(adminViewModelProvider.notifier).refresh();
+      if (!context.mounted) return;
+      showAppSnackBar(context, 'Terminal $value saved for ${locker.name}');
+    } catch (e) {
+      if (!context.mounted) return;
+      showAppSnackBar(
+        context,
+        e is ApiException && e.message.trim().isNotEmpty
+            ? e.message
+            : userFacingError(e),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(adminViewModelProvider);
@@ -325,7 +381,7 @@ class AdminLockerManagementScreen extends ConsumerWidget {
                 crossAxisCount: columns,
                 mainAxisSpacing: 12,
                 crossAxisSpacing: 12,
-                childAspectRatio: 1.45,
+                childAspectRatio: 1.35,
               ),
               itemCount: state.lockers.length,
               itemBuilder: (context, index) {
@@ -351,16 +407,34 @@ class AdminLockerManagementScreen extends ConsumerWidget {
                         style: AppTextStyles.body,
                       ),
                       Text(
+                        locker.terminalNumber != null
+                            ? 'Terminal ${locker.terminalNumber}'
+                            : 'Terminal not set',
+                        style: AppTextStyles.caption.copyWith(
+                          color: locker.terminalNumber != null
+                              ? AppColors.muted
+                              : AppColors.error,
+                        ),
+                      ),
+                      Text(
                         '${locker.distanceMeters}m away',
                         style: AppTextStyles.caption,
                       ),
                       const Spacer(),
-                      Align(
-                        alignment: Alignment.bottomRight,
-                        child: FilledButton.tonal(
-                          onPressed: () => context.push('/locker/${locker.id}'),
-                          child: const Text('Manage'),
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () =>
+                                _editTerminal(context, ref, locker),
+                            child: const Text('Set terminal'),
+                          ),
+                          FilledButton.tonal(
+                            onPressed: () =>
+                                context.push('/locker/${locker.id}'),
+                            child: const Text('Manage'),
+                          ),
+                        ],
                       ),
                     ],
                   ),

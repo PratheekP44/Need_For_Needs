@@ -52,6 +52,14 @@ class LockerRepository {
     }
     return Boolean(await Locker.exists(query));
   }
+
+  async existsByTerminalNumber(terminalNumber, excludeId = null) {
+    const query = { terminalNumber: Number(terminalNumber) };
+    if (excludeId) {
+      query._id = { $ne: excludeId };
+    }
+    return Boolean(await Locker.exists(query));
+  }
 }
 
 module.exports = new LockerRepository();

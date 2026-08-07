@@ -31,6 +31,7 @@ function buildLockerPayload(locker, boxes = [], origin = null, extras = {}) {
         latitude: locker.latitude,
         longitude: locker.longitude,
         BLEDevice: locker.BLEDevice,
+        terminalNumber: locker.terminalNumber,
         status: locker.status,
         totalBoxes: locker.totalBoxes,
         description: locker.description,
@@ -74,12 +75,25 @@ class LockerService {
       throw new AppError('Locker ID already exists', 409);
     }
 
+    const terminalNumber = Number(payload.terminalNumber);
+    if (
+      !Number.isInteger(terminalNumber) ||
+      terminalNumber < 1 ||
+      terminalNumber > 255
+    ) {
+      throw new AppError('terminalNumber must be an integer between 1 and 255', 400);
+    }
+    if (await lockerRepository.existsByTerminalNumber(terminalNumber)) {
+      throw new AppError('Terminal number already assigned to another locker', 409);
+    }
+
     const locker = await lockerRepository.create({
       lockerId,
       lockerName: payload.lockerName,
       latitude: payload.latitude,
       longitude: payload.longitude,
       BLEDevice: payload.BLEDevice || null,
+      terminalNumber,
       status: payload.status || 'OFFLINE',
       totalBoxes: payload.totalBoxes,
       description: payload.description || '',
@@ -103,10 +117,12 @@ class LockerService {
         'lockerId',
         'status',
         'totalBoxes',
+        'terminalNumber',
       ],
       filterFields: {
         status: 'status',
         lockerId: 'lockerId',
+        terminalNumber: 'terminalNumber',
       },
       searchFields: ['lockerName', 'lockerId', 'description'],
     });
@@ -179,6 +195,30 @@ class LockerService {
         throw new AppError('Locker ID already exists', 409);
       }
       payload.lockerId = nextLockerId;
+    }
+
+    if (payload.terminalNumber !== undefined) {
+      const terminalNumber = Number(payload.terminalNumber);
+      if (
+        !Number.isInteger(terminalNumber) ||
+        terminalNumber < 1 ||
+        terminalNumber > 255
+      ) {
+        throw new AppError(
+          'terminalNumber must be an integer between 1 and 255',
+          400,
+        );
+      }
+      if (
+        terminalNumber !== locker.terminalNumber &&
+        (await lockerRepository.existsByTerminalNumber(terminalNumber, locker._id))
+      ) {
+        throw new AppError(
+          'Terminal number already assigned to another locker',
+          409,
+        );
+      }
+      payload.terminalNumber = terminalNumber;
     }
 
     const previousTotal = locker.totalBoxes;

@@ -69,6 +69,7 @@ async function ensureDemoLocker(adminId) {
     latitude: 12.9716,
     longitude: 77.5946,
     totalBoxes: 8,
+    terminalNumber: 1,
     description: 'Demo locker for stock assignment',
     status: 'ACTIVE',
   });

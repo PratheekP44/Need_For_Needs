@@ -104,9 +104,8 @@ class UnlockPayloadService {
       parsePositiveInt(box?.boxId) ||
       parsePositiveInt(boxId);
     const port = boxNumber;
-    const terminalId =
-      parsePositiveInt(locker?.terminalNumber) ||
-      parsePositiveInt(lockerId);
+    // DB is source of truth — never derive terminal from lockerId.
+    const terminalId = parsePositiveInt(locker?.terminalNumber);
 
     if (!lockerId) {
       throw new AppError('Order locker id is missing', 422);
@@ -115,7 +114,10 @@ class UnlockPayloadService {
       throw new AppError('Order box / port information is missing', 422);
     }
     if (terminalId == null) {
-      throw new AppError('Order terminal id could not be resolved', 422);
+      throw new AppError(
+        'Locker terminalNumber is not configured — assign it on the Locker record',
+        422,
+      );
     }
     if (!ble?.macAddress) {
       throw new AppError(

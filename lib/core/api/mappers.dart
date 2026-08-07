@@ -60,6 +60,9 @@ Locker mapLocker(
     latitude: json['latitude'] is num ? (json['latitude'] as num).toDouble() : null,
     longitude: json['longitude'] is num ? (json['longitude'] as num).toDouble() : null,
     lockerCode: asString(json['lockerId']) ?? '',
+    terminalNumber: json['terminalNumber'] == null
+        ? null
+        : asInt(json['terminalNumber']),
   );
 }
 

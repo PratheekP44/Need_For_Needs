@@ -39,6 +39,12 @@ const createLockerValidator = [
     .isInt({ min: 1, max: 500 })
     .withMessage('totalBoxes must be an integer between 1 and 500')
     .toInt(),
+  body('terminalNumber')
+    .notEmpty()
+    .withMessage('terminalNumber is required')
+    .isInt({ min: 1, max: 255 })
+    .withMessage('terminalNumber must be an integer between 1 and 255')
+    .toInt(),
   body('status')
     .optional()
     .isIn(LOCKER_STATUSES)
@@ -78,6 +84,11 @@ const updateLockerValidator = [
     .isInt({ min: 1, max: 500 })
     .withMessage('totalBoxes must be an integer between 1 and 500')
     .toInt(),
+  body('terminalNumber')
+    .optional()
+    .isInt({ min: 1, max: 255 })
+    .withMessage('terminalNumber must be an integer between 1 and 255')
+    .toInt(),
   body('status')
     .optional()
     .isIn(LOCKER_STATUSES)
@@ -101,6 +112,7 @@ const listLockersValidator = [
   query('search').optional().isString(),
   query('sort').optional().isString(),
   query('lockerId').optional().isString(),
+  query('terminalNumber').optional().isInt({ min: 1, max: 255 }).toInt(),
 ];
 
 module.exports = {

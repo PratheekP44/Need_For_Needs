@@ -41,6 +41,16 @@ const lockerSchema = new mongoose.Schema(
       ref: 'BLEDevice',
       default: null,
     },
+    /**
+     * Physical locker controller id (firmware terminal).
+     * Source of truth for Unlock JWT `terminalId` — never derived from lockerId.
+     */
+    terminalNumber: {
+      type: Number,
+      required: [true, 'Terminal number is required'],
+      min: [1, 'Terminal number must be at least 1'],
+      max: [255, 'Terminal number cannot exceed 255'],
+    },
     status: {
       type: String,
       enum: {
@@ -74,6 +84,7 @@ const lockerSchema = new mongoose.Schema(
 lockerSchema.index({ lockerId: 1 }, { unique: true });
 lockerSchema.index({ status: 1 });
 lockerSchema.index({ BLEDevice: 1 });
+lockerSchema.index({ terminalNumber: 1 }, { unique: true });
 lockerSchema.index({ latitude: 1, longitude: 1 });
 lockerSchema.index({ lockerName: 'text', description: 'text', lockerId: 'text' });
 
@@ -85,6 +96,7 @@ lockerSchema.methods.toPublicObject = function toPublicObject(extra = {}) {
     latitude: this.latitude,
     longitude: this.longitude,
     BLEDevice: this.BLEDevice,
+    terminalNumber: this.terminalNumber,
     status: this.status,
     totalBoxes: this.totalBoxes,
     description: this.description,

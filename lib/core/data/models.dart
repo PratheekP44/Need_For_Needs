@@ -97,6 +97,7 @@ class Locker {
     this.latitude,
     this.longitude,
     this.lockerCode = '',
+    this.terminalNumber,
   });
 
   final String id;
@@ -110,11 +111,15 @@ class Locker {
   final double? longitude;
   final String lockerCode;
 
+  /// Physical controller id from backend Locker.terminalNumber (1–255).
+  final int? terminalNumber;
+
   Locker copyWith({
     int? distanceMeters,
     int? availableItems,
     String? status,
     int? openBoxes,
+    int? terminalNumber,
   }) {
     return Locker(
       id: id,
@@ -127,6 +132,7 @@ class Locker {
       latitude: latitude,
       longitude: longitude,
       lockerCode: lockerCode,
+      terminalNumber: terminalNumber ?? this.terminalNumber,
     );
   }
 }

@@ -223,6 +223,58 @@ class LockerRepository {
     return mapLocker(data, distanceMeters: distance, availableItems: availableItems);
   }
 
+  /// Admin: create a locker (requires [terminalNumber] 1–255).
+  Future<Locker> create({
+    required String lockerId,
+    required String lockerName,
+    required double latitude,
+    required double longitude,
+    required int totalBoxes,
+    required int terminalNumber,
+    String? description,
+    String? status,
+    String? bleDeviceId,
+  }) async {
+    final data = asMap(await _api.post('/lockers', body: {
+      'lockerId': lockerId,
+      'lockerName': lockerName,
+      'latitude': latitude,
+      'longitude': longitude,
+      'totalBoxes': totalBoxes,
+      'terminalNumber': terminalNumber,
+      if (description != null) 'description': description,
+      if (status != null) 'status': status,
+      if (bleDeviceId != null) 'BLEDevice': bleDeviceId,
+    }));
+    return mapLocker(data);
+  }
+
+  /// Admin: update locker fields (e.g. assign [terminalNumber]).
+  Future<Locker> update(
+    String id, {
+    String? lockerName,
+    double? latitude,
+    double? longitude,
+    int? totalBoxes,
+    int? terminalNumber,
+    String? description,
+    String? status,
+    String? bleDeviceId,
+  }) async {
+    final body = <String, dynamic>{
+      if (lockerName != null) 'lockerName': lockerName,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
+      if (totalBoxes != null) 'totalBoxes': totalBoxes,
+      if (terminalNumber != null) 'terminalNumber': terminalNumber,
+      if (description != null) 'description': description,
+      if (status != null) 'status': status,
+      if (bleDeviceId != null) 'BLEDevice': bleDeviceId,
+    };
+    final data = asMap(await _api.put('/lockers/$id', body: body));
+    return mapLocker(data);
+  }
+
   Future<_LatLng?> _resolvePosition() async {
     final p = await _location.currentPosition();
     if (p == null) return null;
