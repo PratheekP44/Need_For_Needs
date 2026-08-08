@@ -145,11 +145,7 @@ class LockerCard extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: AppColors.border),
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFFFFFFFF), Color(0xFFECF6F0)],
-            ),
+            gradient: AppColors.lockerCardGradient,
           ),
           child: Row(
             children: [
@@ -176,16 +172,16 @@ class LockerCard extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: locker.status == 'Online'
-                            ? AppColors.chip
-                            : const Color(0xFFFFF3CD),
+                            ? AppColors.successSoft
+                            : AppColors.offlineBg,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
                         locker.status,
                         style: AppTextStyles.caption.copyWith(
                           color: locker.status == 'Online'
-                              ? AppColors.primary
-                              : const Color(0xFF8A6D1D),
+                              ? AppColors.stockHealthyFg
+                              : AppColors.offlineFg,
                           fontWeight: FontWeight.w700,
                         ),
                       ),

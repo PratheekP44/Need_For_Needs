@@ -90,15 +90,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       body: Container(
         width: double.infinity,
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              AppColors.primary,
-              AppColors.primaryLight,
-              AppColors.secondary,
-            ],
-          ),
+          gradient: AppColors.splashGradient,
         ),
         child: FadeTransition(
           opacity: _fade,
@@ -112,26 +104,26 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   child: Container(
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.14),
+                      color: AppColors.onPrimary.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(28),
                     ),
                     child: const Icon(
                       Icons.lock_open_rounded,
                       size: 56,
-                      color: Colors.white,
+                      color: AppColors.onPrimary,
                     ),
                   ),
                 ),
                 const SizedBox(height: 28),
                 Text(
                   'Need For Needs',
-                  style: AppTextStyles.display.copyWith(color: Colors.white),
+                  style: AppTextStyles.display.copyWith(color: AppColors.onPrimary),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   'Campus Essentials - Smart Lockers',
                   style: AppTextStyles.body.copyWith(
-                    color: Colors.white.withValues(alpha: 0.85),
+                    color: AppColors.onPrimary.withValues(alpha: 0.85),
                   ),
                 ),
                 if (_logoPresses > 0 && _logoPresses < 5) ...[
@@ -139,7 +131,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   Text(
                     'Developer unlock $_logoPresses/5',
                     style: AppTextStyles.caption.copyWith(
-                      color: Colors.white.withValues(alpha: 0.7),
+                      color: AppColors.onPrimary.withValues(alpha: 0.7),
                     ),
                   ),
                 ],

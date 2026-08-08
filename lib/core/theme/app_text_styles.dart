@@ -3,40 +3,40 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'app_colors.dart';
 
-/// Typography for Campus Essentials.
+/// NeedForNeeds typography tokens (Plus Jakarta Sans).
 class AppTextStyles {
   const AppTextStyles._();
 
   static TextStyle get display => GoogleFonts.plusJakartaSans(
         fontSize: 32,
         fontWeight: FontWeight.w700,
-        color: AppColors.onBackground,
+        color: AppColors.primaryText,
         letterSpacing: -0.5,
       );
 
   static TextStyle get headline => GoogleFonts.plusJakartaSans(
         fontSize: 24,
         fontWeight: FontWeight.w700,
-        color: AppColors.onBackground,
+        color: AppColors.primaryText,
       );
 
   static TextStyle get title => GoogleFonts.plusJakartaSans(
         fontSize: 18,
         fontWeight: FontWeight.w600,
-        color: AppColors.onBackground,
+        color: AppColors.primaryText,
       );
 
   static TextStyle get body => GoogleFonts.plusJakartaSans(
         fontSize: 14,
         fontWeight: FontWeight.w400,
-        color: AppColors.onBackground,
+        color: AppColors.primaryText,
         height: 1.45,
       );
 
   static TextStyle get caption => GoogleFonts.plusJakartaSans(
         fontSize: 12,
         fontWeight: FontWeight.w500,
-        color: AppColors.muted,
+        color: AppColors.secondaryText,
       );
 
   static TextStyle get label => GoogleFonts.plusJakartaSans(

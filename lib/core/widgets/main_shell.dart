@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/cart/viewmodels/cart_viewmodel.dart';
-import '../theme/app_colors.dart';
 
 /// Bottom navigation shell: Home / Orders / Profile.
 class MainShell extends ConsumerWidget {
@@ -50,7 +49,6 @@ class MainShell extends ConsumerWidget {
       floatingActionButton: navigationShell.currentIndex == 0
           ? FloatingActionButton.extended(
               onPressed: () => context.push('/cart'),
-              backgroundColor: AppColors.primary,
               icon: Badge(
                 isLabelVisible: cartCount > 0,
                 label: Text('$cartCount'),

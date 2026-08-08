@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
 /// Shared page scaffold with optional back affordance and actions.
@@ -26,12 +25,15 @@ class PageScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(title),
         automaticallyImplyLeading: showBack,
         actions: actions,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        foregroundColor: scheme.onSurface,
       ),
       floatingActionButton: floatingActionButton,
       bottomNavigationBar: bottom == null

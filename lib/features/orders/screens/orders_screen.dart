@@ -168,13 +168,13 @@ class OrdersScreen extends ConsumerWidget {
       return (AppColors.chip, AppColors.primary);
     }
     if (lower.contains('cancel')) {
-      return (const Color(0xFFFDECEC), AppColors.error);
+      return (AppColors.cancelBg, AppColors.error);
     }
     if (lower.contains('collect') || lower.contains('complete')) {
       return (AppColors.surfaceMuted, AppColors.muted);
     }
     if (lower.contains('paid') || lower.contains('confirm')) {
-      return (const Color(0xFFE8F1FF), const Color(0xFF1D4ED8));
+      return (AppColors.paidBg, AppColors.paidFg);
     }
     return (AppColors.surfaceMuted, AppColors.primary);
   }

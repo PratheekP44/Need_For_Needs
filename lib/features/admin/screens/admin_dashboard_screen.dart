@@ -180,45 +180,49 @@ class AdminDashboardScreen extends ConsumerWidget {
                         label: 'Total lockers',
                         value: '${stats.totalLockers}',
                         icon: Icons.meeting_room_outlined,
+                        useBrandGradient: true,
                       ),
                       StatCard(
                         label: 'Lockers online',
                         value: '${stats.lockersOnline > 0 ? stats.lockersOnline : stats.availableLockers}',
                         icon: Icons.lock_open_rounded,
-                        color: AppColors.secondary,
+                        useBrandGradient: true,
                       ),
                       StatCard(
                         label: 'Orders today',
                         value: '${stats.ordersToday}',
                         icon: Icons.receipt_long_outlined,
-                        color: AppColors.accent,
+                        useBrandGradient: true,
                       ),
                       StatCard(
                         label: 'Revenue today',
                         value: MoneyFormat.format(stats.revenueToday),
                         icon: Icons.payments_outlined,
-                        color: AppColors.success,
+                        useBrandGradient: true,
                       ),
                       StatCard(
                         label: 'Users',
                         value: '${stats.totalUsers}',
                         icon: Icons.people_outline,
+                        useBrandGradient: true,
                       ),
                       StatCard(
                         label: 'Items',
                         value: '${stats.totalItems}',
                         icon: Icons.inventory_2_outlined,
+                        useBrandGradient: true,
                       ),
                       StatCard(
                         label: 'Low / out of stock',
                         value: '${stats.lowStockCount}/${stats.outOfStockCount}',
                         icon: Icons.warning_amber_rounded,
-                        color: AppColors.error,
+                        useBrandGradient: true,
                       ),
                       StatCard(
                         label: 'Empty / occupied boxes',
                         value: '${stats.emptyBoxes}/${stats.occupiedBoxes}',
                         icon: Icons.grid_view_rounded,
+                        useBrandGradient: true,
                       ),
                     ],
                   ),
@@ -537,116 +541,344 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
         children: [
           FloatingActionButton.extended(
             heroTag: 'assign-stock',
+            backgroundColor: AppColors.primaryLight,
+            foregroundColor: AppColors.onPrimary,
+            elevation: 3,
             onPressed: () => context.push('/admin/inventory/assign'),
             icon: const Icon(Icons.inventory_2_outlined),
-            label: const Text('Assign stock'),
+            label: const Text(
+              'Assign stock',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           FloatingActionButton.extended(
             heroTag: 'add-item',
+            backgroundColor: AppColors.primary,
+            foregroundColor: AppColors.onPrimary,
+            elevation: 3,
             onPressed: () => context.push('/admin/inventory/add'),
             icon: const Icon(Icons.add_rounded),
-            label: const Text('Add item'),
+            label: const Text(
+              'Add item',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
       body: state.isLoading
           ? const Center(child: CircularProgressIndicator())
           : state.inventory.isEmpty
-              ? const EmptyState(
-                  message: 'No inventory items yet',
-                  icon: Icons.inventory_2_outlined,
+              ? Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 28,
+                      vertical: 36,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: AppColors.tableBorder,
+                        width: 1.5,
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: AppColors.shadow,
+                          blurRadius: 10,
+                          offset: Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: const EmptyState(
+                      message: 'No inventory items yet',
+                      icon: Icons.inventory_2_outlined,
+                    ),
+                  ),
                 )
               : SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minWidth: MediaQuery.sizeOf(context).width - 40,
-                    ),
-                    child: DataTable(
-                      headingRowColor:
-                          WidgetStatePropertyAll(AppColors.surfaceMuted),
-                      columns: const [
-                        DataColumn(label: Text('Image')),
-                        DataColumn(label: Text('Item')),
-                        DataColumn(label: Text('Price')),
-                        DataColumn(label: Text('Qty')),
-                        DataColumn(label: Text('Locker')),
-                        DataColumn(label: Text('Box')),
-                        DataColumn(label: Text('Actions')),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(12, 14, 12, 18),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: AppColors.tableBorder,
+                        width: 1.5,
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: AppColors.shadow,
+                          blurRadius: 12,
+                          offset: Offset(0, 4),
+                        ),
                       ],
-                      rows: state.inventory.map((row) {
-                        final deleting = _deletingId == row.id;
-                        return DataRow(
-                          cells: [
-                            DataCell(
-                              SizedBox(
-                                width: 44,
-                                height: 44,
-                                child: ProductImage(
-                                  imageUrl: row.imageUrl,
-                                  height: 44,
-                                  width: 44,
-                                  borderRadius: 8,
-                                  iconSize: 20,
-                                ),
-                              ),
+                    ),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minWidth: MediaQuery.sizeOf(context).width - 64,
+                        ),
+                        child: DataTable(
+                          headingRowHeight: 52,
+                          dataRowMinHeight: 64,
+                          dataRowMaxHeight: 76,
+                          horizontalMargin: 16,
+                          columnSpacing: 22,
+                          dividerThickness: 1.2,
+                          border: TableBorder(
+                            horizontalInside: BorderSide(
+                              color: AppColors.tableBorder,
+                              width: 1,
                             ),
-                            DataCell(Text(row.name)),
-                            DataCell(Text(MoneyFormat.format(row.price))),
-                            DataCell(Text('${row.quantity}')),
-                            DataCell(Text(row.assignedLocker)),
-                            DataCell(
-                              Text(
-                                row.boxNumber != null
-                                    ? '#${row.boxNumber}'
-                                    : '—',
-                              ),
-                            ),
-                            DataCell(
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Edit',
-                                    onPressed: deleting
-                                        ? null
-                                        : () {
-                                            final target = row.itemId.isNotEmpty
-                                                ? row.itemId
-                                                : row.id;
-                                            context.push(
-                                              '/admin/inventory/edit/$target',
-                                            );
-                                          },
-                                    icon: const Icon(Icons.edit_outlined),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Delete stock',
-                                    onPressed:
-                                        deleting ? null : () => _confirmDelete(row),
-                                    icon: deleting
-                                        ? const SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : Icon(
-                                            Icons.delete_outline_rounded,
-                                            color: AppColors.error,
-                                          ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                          ),
+                          headingRowColor: const WidgetStatePropertyAll(
+                            AppColors.tableHeader,
+                          ),
+                          headingTextStyle: AppTextStyles.label.copyWith(
+                            color: AppColors.onPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.2,
+                          ),
+                          dataTextStyle: AppTextStyles.body.copyWith(
+                            color: AppColors.onBackground,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          columns: const [
+                            DataColumn(label: Text('Image')),
+                            DataColumn(label: Text('Item')),
+                            DataColumn(label: Text('Price')),
+                            DataColumn(label: Text('Qty')),
+                            DataColumn(label: Text('Status')),
+                            DataColumn(label: Text('Locker')),
+                            DataColumn(label: Text('Box')),
+                            DataColumn(label: Text('Actions')),
                           ],
-                        );
-                      }).toList(),
+                          rows: [
+                            for (var i = 0; i < state.inventory.length; i++)
+                              _inventoryDataRow(
+                                state.inventory[i],
+                                index: i,
+                                deleting: _deletingId == state.inventory[i].id,
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
+    );
+  }
+
+  DataRow _inventoryDataRow(
+    InventoryRow row, {
+    required int index,
+    required bool deleting,
+  }) {
+    final status = _InventoryStockStatus.fromQuantity(row.quantity);
+    final isEven = index.isEven;
+
+    return DataRow(
+      color: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.pressed)) {
+          return AppColors.tableRowHover;
+        }
+        // Alternating rows for scanability — white vs warm tint.
+        return isEven ? AppColors.surface : AppColors.tableRowAlt;
+      }),
+      cells: [
+        DataCell(
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.tableBorder),
+              color: AppColors.surfaceMuted,
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: ProductImage(
+              imageUrl: row.imageUrl,
+              height: 48,
+              width: 48,
+              borderRadius: 9,
+              iconSize: 22,
+            ),
+          ),
+        ),
+        DataCell(
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: Text(
+              row.name,
+              style: AppTextStyles.body.copyWith(
+                color: AppColors.onBackground,
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+        DataCell(
+          Text(
+            MoneyFormat.format(row.price),
+            style: AppTextStyles.body.copyWith(
+              color: AppColors.primary,
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+            ),
+          ),
+        ),
+        DataCell(
+          Text(
+            '${row.quantity}',
+            style: AppTextStyles.title.copyWith(
+              color: status.quantityColor,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        DataCell(_InventoryStatusChip(status: status)),
+        DataCell(
+          Text(
+            row.assignedLocker,
+            style: AppTextStyles.body.copyWith(
+              color: AppColors.primaryText,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        DataCell(
+          Text(
+            row.boxNumber != null ? '#${row.boxNumber}' : '—',
+            style: AppTextStyles.body.copyWith(
+              color: AppColors.onBackground,
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+            ),
+          ),
+        ),
+        DataCell(
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Edit',
+                style: IconButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  backgroundColor: AppColors.surfaceMuted,
+                  side: const BorderSide(color: AppColors.tableBorder),
+                ),
+                onPressed: deleting
+                    ? null
+                    : () {
+                        final target =
+                            row.itemId.isNotEmpty ? row.itemId : row.id;
+                        context.push('/admin/inventory/edit/$target');
+                      },
+                icon: const Icon(Icons.edit_outlined),
+              ),
+              const SizedBox(width: 6),
+              IconButton(
+                tooltip: 'Delete stock',
+                style: IconButton.styleFrom(
+                  foregroundColor: AppColors.error,
+                  backgroundColor: AppColors.errorSoft,
+                  side: BorderSide(
+                    color: AppColors.error.withValues(alpha: 0.45),
+                  ),
+                ),
+                onPressed: deleting ? null : () => _confirmDelete(row),
+                icon: deleting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.delete_outline_rounded),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Visual stock status derived from quantity (display only).
+enum _InventoryStockStatus {
+  inStock,
+  lowStock,
+  outOfStock;
+
+  static _InventoryStockStatus fromQuantity(int qty) {
+    if (qty <= 0) return _InventoryStockStatus.outOfStock;
+    if (qty <= 2) return _InventoryStockStatus.lowStock;
+    return _InventoryStockStatus.inStock;
+  }
+
+  String get label => switch (this) {
+        _InventoryStockStatus.inStock => 'In Stock',
+        _InventoryStockStatus.lowStock => 'Low Stock',
+        _InventoryStockStatus.outOfStock => 'Out of Stock',
+      };
+
+  Color get quantityColor => switch (this) {
+        _InventoryStockStatus.inStock => AppColors.stockHealthy,
+        _InventoryStockStatus.lowStock => AppColors.stockLowFg,
+        _InventoryStockStatus.outOfStock => AppColors.stockOut,
+      };
+}
+
+class _InventoryStatusChip extends StatelessWidget {
+  const _InventoryStatusChip({required this.status});
+
+  final _InventoryStockStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final (bg, fg, border) = switch (status) {
+      _InventoryStockStatus.inStock => (
+          AppColors.stockHealthyBg,
+          AppColors.stockHealthyFg,
+          AppColors.stockHealthyBorder,
+        ),
+      _InventoryStockStatus.lowStock => (
+          AppColors.stockLowBg,
+          AppColors.stockLowFg,
+          AppColors.stockLowBorder,
+        ),
+      _InventoryStockStatus.outOfStock => (
+          AppColors.stockOutBg,
+          AppColors.stockOutFg,
+          AppColors.stockOutBorder,
+        ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: border, width: 1.2),
+      ),
+      child: Text(
+        status.label,
+        style: AppTextStyles.caption.copyWith(
+          color: fg,
+          fontWeight: FontWeight.w800,
+          fontSize: 11,
+          letterSpacing: 0.15,
+        ),
+      ),
     );
   }
 }

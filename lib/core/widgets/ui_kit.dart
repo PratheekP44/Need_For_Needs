@@ -98,10 +98,13 @@ class PrimaryButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final enabled = onPressed != null && !isLoading;
     final child = isLoading
-        ? const SizedBox(
+        ? SizedBox(
             height: 20,
             width: 20,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Theme.of(context).colorScheme.onPrimary,
+            ),
           )
         : icon == null
             ? Text(label)
@@ -197,6 +200,7 @@ class StatCard extends StatelessWidget {
     required this.value,
     required this.icon,
     this.color = AppColors.primary,
+    this.useBrandGradient = false,
   });
 
   final String label;
@@ -204,14 +208,29 @@ class StatCard extends StatelessWidget {
   final IconData icon;
   final Color color;
 
+  /// Admin dashboard statistic cards use primary → secondary gradient.
+  final bool useBrandGradient;
+
   @override
   Widget build(BuildContext context) {
+    final onGradient = AppColors.onPrimary;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: useBrandGradient ? null : AppColors.surface,
+        gradient: useBrandGradient ? AppColors.brandLinearGradient : null,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
+        border: useBrandGradient ? null : Border.all(color: AppColors.border),
+        boxShadow: useBrandGradient
+            ? const [
+                BoxShadow(
+                  color: AppColors.shadow,
+                  blurRadius: 10,
+                  offset: Offset(0, 4),
+                ),
+              ]
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -219,15 +238,33 @@ class StatCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
+              color: useBrandGradient
+                  ? onGradient.withValues(alpha: 0.18)
+                  : color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: color, size: 20),
+            child: Icon(
+              icon,
+              color: useBrandGradient ? onGradient : color,
+              size: 20,
+            ),
           ),
           const SizedBox(height: 14),
-          Text(value, style: AppTextStyles.title),
+          Text(
+            value,
+            style: AppTextStyles.title.copyWith(
+              color: useBrandGradient ? onGradient : AppColors.primaryText,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(label, style: AppTextStyles.caption),
+          Text(
+            label,
+            style: AppTextStyles.caption.copyWith(
+              color: useBrandGradient
+                  ? onGradient.withValues(alpha: 0.9)
+                  : AppColors.secondaryText,
+            ),
+          ),
         ],
       ),
     );
