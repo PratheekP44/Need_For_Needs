@@ -57,4 +57,24 @@ router.post(
   orderController.issueUnlockPayload,
 );
 
+// Phase 17 — minimal unlock fields (no JWT). Collect uses this.
+router.get(
+  '/orders/:id/unlock-info',
+  authenticate,
+  authorize('user', 'admin'),
+  orderIdParamValidator,
+  validate,
+  orderController.getUnlockInfo,
+);
+
+// Phase 17 — mark COLLECTED after successful BLE unlock.
+router.post(
+  '/orders/:id/collect-complete',
+  authenticate,
+  authorize('user', 'admin'),
+  orderIdParamValidator,
+  validate,
+  orderController.collectComplete,
+);
+
 module.exports = router;

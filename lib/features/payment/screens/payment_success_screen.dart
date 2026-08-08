@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/api/collect_unlock_repository.dart';
 import '../../../core/ble/ble.dart';
 import '../../../core/data/models.dart';
 import '../../../core/payment/checkout_payment_service.dart';
@@ -138,6 +139,7 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
   String _stage = '';
   String? _error;
   bool _opened = false;
+  CollectUnlockInfo? _unlockInfo;
 
   Future<void> _openLocker({
     required OrderPaymentResult? payment,
@@ -145,7 +147,6 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
   }) async {
     if (_busy) return;
 
-    // Order id only — unlock fields come from backend UnlockPayload.
     final orderId = payment?.orderId.isNotEmpty == true
         ? payment!.orderId
         : (payment?.orderNumber.isNotEmpty == true
@@ -164,7 +165,8 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
       _busy = true;
       _error = null;
       _opened = false;
-      _stage = 'Requesting unlock payload…';
+      _unlockInfo = null;
+      _stage = 'Authorizing unlock…';
     });
 
     try {
@@ -173,62 +175,111 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
         ref.read(bleConfigProvider.notifier).useRealBle();
       }
 
-      final payloadService = ref.read(unlockPayloadServiceProvider);
-      final payload = await payloadService.requestPayload(orderId: orderId);
-      ref.read(lastUnlockPayloadProvider.notifier).setPayload(payload);
+      // Phase 18 — order DB is source of truth (no Unlock JWT, no hardcoded 1).
+      final collectApi = ref.read(collectUnlockRepositoryProvider);
+      final info = await collectApi.fetchUnlockInfo(orderId: orderId);
+      final request = info.toUnlockPacketRequest();
 
-      setState(() => _stage = 'Scanning for LKRM-V2…');
-
-      final unlock = ref.read(unlockServiceProvider);
-      // BLE layer consumes only the backend UnlockPayload (via PacketRequest).
-      final request = payloadService.toPacketRequest(payload);
-
-      // Progress labels from locker state stream while unlock runs.
-      final sub = ref.read(lockerServiceProvider).stateStream.listen((s) {
-        if (!mounted) return;
-        setState(() {
-          _stage = switch (s) {
-            LockerState.scanning => 'Scanning…',
-            LockerState.connecting => 'Connecting…',
-            LockerState.connected => 'Connected — discovering GATT…',
-            LockerState.authenticating => 'Sending AUTH packet…',
-            LockerState.waitingResponse => 'Waiting for locker response…',
-            LockerState.authenticated => 'Authenticated — unlocking…',
-            LockerState.opening => 'Sending unlock packet…',
-            LockerState.success => 'Locker Opened Successfully',
-            LockerState.reconnecting => 'Reconnect…',
-            LockerState.failure => 'Unlock failed',
-            LockerState.disconnected => _stage,
-          };
-        });
+      if (!mounted) return;
+      setState(() {
+        _unlockInfo = info;
+        _stage =
+            'Opening Port ${info.port} / Box ${info.boxNumber} '
+            '(Terminal ${info.terminalNumber})…';
       });
 
-      final result = await unlock.unlock(request);
-      await sub.cancel();
+      // Same BLE engine as Admin BLE Demo — only packet values differ.
+      final engine = ref.read(bleUnlockEngineProvider);
+      final result = await engine.unlockOpen(
+        request,
+        onStage: (stage) {
+          if (!mounted) return;
+          setState(() {
+            _stage = switch (stage) {
+              'scan' => 'Scanning for LKRM-V2…',
+              'connect' => 'Connecting…',
+              'connected' =>
+                'Connected — unlocking box ${info.boxNumber}…',
+              'open' =>
+                'Sending OPEN (port=${info.port}, box=${info.boxNumber})…',
+              'success' => 'Locker Opened Successfully',
+              _ => _stage,
+            };
+          });
+        },
+      );
+
+      if (!mounted) return;
+
+      if (!result.success) {
+        setState(() {
+          _busy = false;
+          _opened = false;
+          _stage = result.message ?? 'Unlock failed';
+          _error = result.message ?? 'Unlock failed';
+        });
+        return;
+      }
+
+      setState(() => _stage = 'Confirming with server…');
+      var backendOk = true;
+      try {
+        await collectApi.markCollected(orderId: info.orderId);
+      } catch (e) {
+        backendOk = false;
+        BleLog.e('collect-complete failed (BLE already unlocked)', e);
+      }
 
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _opened = result.success;
-        _stage = result.success
-            ? 'Locker Opened Successfully'
-            : (result.message ?? 'Unlock failed (${result.stage})');
-        _error = result.success ? null : result.message;
+        _opened = true;
+        _stage = backendOk
+            ? 'Box ${info.boxNumber} opened successfully'
+            : 'Box opened — server confirm failed';
+        _error =
+            backendOk ? null : 'Backend authorization failed (collect-complete)';
       });
 
-      if (result.success && mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Locker Opened Successfully')),
+          SnackBar(
+            content: Text(
+              backendOk
+                  ? 'Box ${info.boxNumber} opened'
+                  : 'Locker opened — could not mark order collected',
+            ),
+          ),
         );
       }
     } catch (e) {
       if (!mounted) return;
+      final message = _friendlyCollectError(e);
       setState(() {
         _busy = false;
-        _error = e.toString();
+        _error = message;
         _stage = 'Error';
       });
     }
+  }
+
+  static String _friendlyCollectError(Object e) {
+    final text = e.toString();
+    final lower = text.toLowerCase();
+    if (lower.contains('403') || lower.contains('forbidden')) {
+      return 'Backend authorization failed';
+    }
+    if (lower.contains('not ready') || lower.contains('status=')) {
+      return 'Backend authorization failed';
+    }
+    if (lower.contains('device not found')) return 'Device not found';
+    if (lower.contains('unable to connect') || lower.contains('connection')) {
+      return 'Unable to connect';
+    }
+    if (lower.contains('write failed')) return 'Write failed';
+    if (lower.contains('notification timeout')) return 'Notification timeout';
+    if (lower.contains('unlock')) return 'Unlock failed';
+    return text;
   }
 
   @override
@@ -291,6 +342,25 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
                       style: AppTextStyles.body
                           .copyWith(color: AppColors.muted),
                     ),
+                    if (_unlockInfo != null) ...[
+                      const SizedBox(height: 16),
+                      Text('Unlock target (from order)', style: AppTextStyles.caption),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Terminal ${_unlockInfo!.terminalNumber} · '
+                        'Port ${_unlockInfo!.port} · '
+                        'Box ${_unlockInfo!.boxNumber}',
+                        style: AppTextStyles.label,
+                      ),
+                      if (_unlockInfo!.itemId.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Item ${_unlockInfo!.itemId}',
+                          style: AppTextStyles.caption
+                              .copyWith(color: AppColors.muted),
+                        ),
+                      ],
+                    ],
                   ],
                 ),
               ),
@@ -326,11 +396,10 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
                   children: [
                     Text(
                       _opened
-                          ? 'Locker Opened Successfully. Retrieve your items and close the door.'
+                          ? 'Box opened. Retrieve your items and close the door.'
                           : 'Stand near LKRM-V2 and tap Open Locker. '
-                              'The app requests an unlock payload from the server, '
-                              'then connects over BLE, writes the packet, and waits '
-                              'for the locker response.',
+                              'The app loads Port / Box / Terminal from your order, '
+                              'then uses the same BLE engine as Admin BLE Demo.',
                       style: AppTextStyles.body.copyWith(
                         color: _opened ? AppColors.success : AppColors.muted,
                       ),

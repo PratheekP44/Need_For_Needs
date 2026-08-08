@@ -8,19 +8,23 @@ import '../models/ble_device.dart';
 import '../models/unlock_payload.dart';
 import '../protocol/packet_builder.dart';
 import '../protocol/packet_parser.dart';
-import '../protocol/packet_types.dart';
 import '../protocol/parsed_ble_response.dart';
 import '../protocol/real_packet_builder.dart';
 import '../transport/ble_log.dart';
 import '../transport/flutter_blue_transport.dart';
+import 'ble_unlock_engine.dart';
 
-/// Orchestrates Collect → BLE unlock → parse → optional backend confirm.
+/// Orchestrates unlock → optional backend confirm.
 ///
-/// Real hardware uses [RealPacketBuilder] (fixed 32-byte firmware packet).
+/// Real hardware delegates to [BleUnlockEngine] (same path as Admin BLE Demo).
 /// Virtual MCU / mock keeps Phase-10 via [PacketBuilder] + [LockerService].
+///
+/// Production Collect (Phase 17) calls [BleUnlockEngine] directly; this class
+/// remains for Virtual MCU / legacy callers and shares the same engine.
 class UnlockService {
   UnlockService({
     required LockerService locker,
+    BleUnlockEngine? engine,
     PacketBuilder? packetBuilder,
     RealPacketBuilder? realPacketBuilder,
     PacketParser? packetParser,
@@ -28,30 +32,36 @@ class UnlockService {
     Future<bool> Function(UnlockPacketRequest request, UnlockResult result)?
         confirmWithBackend,
   })  : _locker = locker,
+        _engine = engine ??
+            BleUnlockEngine(
+              locker: locker,
+              packetBuilder: realPacketBuilder,
+              packetParser: packetParser,
+              timeouts: timeouts,
+            ),
         _builder = packetBuilder ?? PacketBuilder(),
         _realBuilder = realPacketBuilder ?? const RealPacketBuilder(),
         _parser = packetParser ?? PacketParser(),
-        _timeouts = timeouts ?? const TimeoutManager(),
         _confirmWithBackend = confirmWithBackend;
 
   final LockerService _locker;
+  final BleUnlockEngine _engine;
   final PacketBuilder _builder;
   final RealPacketBuilder _realBuilder;
   final PacketParser _parser;
-  final TimeoutManager _timeouts;
   final Future<bool> Function(UnlockPacketRequest request, UnlockResult result)?
       _confirmWithBackend;
 
-  BleConnectionManager get connection => BleConnectionManager(
-        connection: _locker.connectionManager,
-        config: _locker.config,
-      );
+  BleUnlockEngine get engine => _engine;
+
+  BleConnectionManager get connection => _engine.connection;
 
   PacketBuilder get packetBuilder => _builder;
   RealPacketBuilder get realPacketBuilder => _realBuilder;
   PacketParser get packetParser => _parser;
 
   /// Full unlock flow for Collect — consumes backend [UnlockPayload] only.
+  /// Kept for JWT-era callers; Phase 17 Collect does not use this.
   Future<UnlockResult> unlockWithPayload(UnlockPayload payload) async {
     BleLog.d(
       'Unlock request jti=${payload.jti} order=${payload.orderId} '
@@ -70,7 +80,7 @@ class UnlockService {
     return unlock(payload.toUnlockPacketRequest());
   }
 
-  /// Packet-level unlock (tests / internal). Prefer [unlockWithPayload].
+  /// Packet-level unlock. Real BLE → [BleUnlockEngine.unlockOpen].
   Future<UnlockResult> unlock(UnlockPacketRequest request) async {
     BleLog.d(
       'UnlockService.start order=${request.orderId} '
@@ -79,196 +89,50 @@ class UnlockService {
       'tx=${request.transactionId} real=${_locker.config.isRealBle}',
     );
 
+    if (_locker.config.isRealBle) {
+      return _unlockRealFirmware(request);
+    }
+
     if (request.collectionToken.isEmpty) {
       return UnlockResult.fail(
         stage: 'payload',
         message: 'Missing unlockToken from backend UnlockPayload',
       );
     }
-
-    if (_locker.config.isRealBle) {
-      return _unlockRealFirmware(request);
-    }
     return _unlockPhase10(request);
   }
 
-  // ── Real CC2340 firmware: fixed 32-byte packet ─────────────────────
+  // ── Real CC2340 firmware: shared BleUnlockEngine (Demo-proven) ──────
 
   Future<UnlockResult> _unlockRealFirmware(UnlockPacketRequest request) async {
-    final ble = connection;
-    ParsedBleResponse? openParsed;
+    var result = await _engine.unlockOpen(request);
 
-    try {
-      await ble.ensurePermissions();
-
-      BleLog.d('UnlockService stage=scan (real firmware)');
-      final List<BleDevice> devices;
-      try {
-        devices = await ble.scan().timeout(
-          _locker.config.scanTimeout + const Duration(seconds: 5),
-          onTimeout: () {
-            BleLog.e('Timeout — scan');
-            throw TimeoutException('Device scan timed out');
-          },
-        );
-      } on TimeoutException catch (e) {
-        return UnlockResult.fail(
-          stage: 'scan',
-          message: 'Device not found (scan timeout)',
-          error: e,
-        );
-      }
-
-      var device = ble.findByAddress(devices, request.bluetoothAddress);
-      device ??= ble.selectLockerDevice(devices);
-      if (device == null) {
-        return UnlockResult.fail(
-          stage: 'scan',
-          message: 'Device not found — power on LKRM-V2 and stand nearby',
-        );
-      }
-
-      BleLog.d('UnlockService stage=connect (real firmware)');
-      try {
-        await _locker.connect(device, lockerId: request.lockerId).timeout(
-          _locker.config.connectTimeout + const Duration(seconds: 20),
-          onTimeout: () {
-            BleLog.e('Timeout — connect');
-            throw TimeoutException('Connection timeout');
-          },
-        );
-        BleLog.d('Connected');
-        final t = _locker.transport;
-        if (t is FlutterBlueTransport) {
-          BleLog.d('MTU ${t.lastMtu}');
-          BleLog.d('Services ${t.discoveredServices.length}');
-        }
-      } on TimeoutException catch (e) {
-        await _safeDisconnect();
-        return UnlockResult.fail(
-          stage: 'connect',
-          message: 'Connection timeout',
-          error: e,
-        );
-      } catch (e) {
-        await _safeDisconnect();
-        return UnlockResult.fail(
-          stage: 'connect',
-          message: 'Connection failed: $e',
-          error: e,
-        );
-      }
-
-      final mtu = switch (_locker.transport) {
-        final FlutterBlueTransport fbp => fbp.lastMtu,
-        _ => _locker.config.desiredMtu,
-      };
-
-      // Single OPEN write — no Phase-10 AUTH / JSON.
-      BleLog.d('UnlockService stage=open (real 32-byte firmware packet)');
-      final packet = _realBuilder.buildOpen(request);
-      if (packet.length != RealPacketBuilder.packetLength) {
-        await _safeDisconnect();
-        return UnlockResult.fail(
-          stage: 'payload',
-          message:
-              'Firmware packet must be ${RealPacketBuilder.packetLength} bytes, '
-              'got ${packet.length}',
-        );
-      }
-
-      try {
-        final raw = await writeAndWait(
-          packet: packet,
-          timeout: _timeouts.responseTimeout(BlePacketType.openBox),
-        );
-        openParsed = raw;
-        BleLog.d('Decoded Response: $openParsed');
-
-        final success = openParsed.kind == BleResponseKind.unlockSuccess ||
-            openParsed.kind == BleResponseKind.ack ||
-            openParsed.opened == true ||
-            // Firmware may return a short/unknown status; treat non-NACK as OK
-            // once a notify arrives after a valid 32-byte OPEN write.
-            (openParsed.kind != BleResponseKind.nack &&
-                openParsed.kind != BleResponseKind.unlockFailure &&
-                openParsed.kind != BleResponseKind.error &&
-                openParsed.kind != BleResponseKind.authRejected);
-
-        if (!success) {
-          await _safeDisconnect();
-          return UnlockResult.fail(
-            stage: 'open',
-            message: openParsed.message ?? 'Unlock Failure',
-            openResponse: openParsed,
-          );
-        }
-      } on TimeoutException catch (e) {
-        await _safeDisconnect();
-        return UnlockResult.fail(
-          stage: 'open_timeout',
-          message: 'Notification timeout (OPEN)',
-          error: e,
-          openResponse: openParsed,
-        );
-      } catch (e) {
-        await _safeDisconnect();
-        return UnlockResult.fail(
-          stage: 'open',
-          message: 'Unlock write/notify failed: $e',
-          error: e,
-          openResponse: openParsed,
-        );
-      }
-
-      var result = UnlockResult.ok(
-        stage: 'unlocked',
-        message: 'Locker Opened Successfully',
-        deviceId: device.id,
-        deviceName: device.name,
-        mtu: mtu,
-        openResponse: openParsed,
-      );
-
-      BleLog.d('UnlockService stage=backend_confirm');
-      var confirmed = false;
-      try {
-        final confirm = _confirmWithBackend;
-        if (confirm != null) {
-          confirmed = await confirm(request, result);
-        } else {
-          BleLog.d(
-            'Backend confirm skipped — no collect-complete endpoint',
-          );
-        }
-      } catch (e) {
-        BleLog.e('Backend confirm failed (non-fatal)', e);
-      }
-
-      result = UnlockResult.ok(
-        stage: 'complete',
-        message: 'Locker Opened Successfully',
-        deviceId: device.id,
-        deviceName: device.name,
-        mtu: mtu,
-        openResponse: openParsed,
-        backendConfirmed: confirmed,
-      );
-
-      await _safeDisconnect();
-      BleLog.d('UnlockService done success=true (real firmware)');
+    if (!result.success) {
       return result;
-    } catch (e, st) {
-      BleLog.e('UnlockService unexpected error (real)', e);
-      BleLog.d('$st');
-      await _safeDisconnect();
-      return UnlockResult.fail(
-        stage: 'unexpected',
-        message: e.toString(),
-        error: e,
-        openResponse: openParsed,
-      );
     }
+
+    BleLog.d('UnlockService stage=backend_confirm');
+    var confirmed = false;
+    try {
+      final confirm = _confirmWithBackend;
+      if (confirm != null) {
+        confirmed = await confirm(request, result);
+      } else {
+        BleLog.d('Backend confirm skipped — caller handles collect-complete');
+      }
+    } catch (e) {
+      BleLog.e('Backend confirm failed (non-fatal)', e);
+    }
+
+    return UnlockResult.ok(
+      stage: 'complete',
+      message: result.message ?? 'Locker Opened Successfully',
+      deviceId: result.deviceId,
+      deviceName: result.deviceName,
+      mtu: result.mtu,
+      openResponse: result.openResponse,
+      backendConfirmed: confirmed,
+    );
   }
 
   // ── Virtual MCU / mock: existing Phase-10 path ─────────────────────
@@ -449,7 +313,7 @@ class UnlockService {
           confirmed = await confirm(request, result);
         } else {
           BleLog.d(
-            'Backend confirm skipped — no collect-complete endpoint',
+            'Backend confirm skipped — caller handles collect-complete',
           );
         }
       } catch (e) {
@@ -484,27 +348,13 @@ class UnlockService {
     }
   }
 
-  /// Write builder bytes and wait/parse one notification.
+  /// Write builder bytes and wait/parse one notification (via shared engine).
   Future<ParsedBleResponse> writeAndWait({
     required Uint8List packet,
     Duration? timeout,
-  }) async {
-    final ble = connection;
-    await ble.writePacket(packet);
-    final raw = await ble.waitForNotification(
-      timeout: timeout ?? _timeouts.responseTimeout(BlePacketType.openBox),
-    );
-    return _parser.parse(raw);
+  }) {
+    return _engine.writeAndWait(packet: packet, timeout: timeout);
   }
 
-  Future<void> _safeDisconnect() async {
-    try {
-      await _locker.disconnectSafely();
-    } catch (e) {
-      BleLog.d('Disconnect error (ignored): $e');
-      try {
-        await connection.disconnect();
-      } catch (_) {}
-    }
-  }
+  Future<void> _safeDisconnect() => _engine.disconnect();
 }

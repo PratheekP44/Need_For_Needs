@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
 import '../api/auth_debug.dart';
+import '../api/collect_unlock_repository.dart';
 import '../api/repositories.dart';
 import '../api/unlock_payload_repository.dart';
 import '../ble/models/unlock_payload.dart';
@@ -71,6 +72,12 @@ final unlockPayloadRepositoryProvider = Provider<UnlockPayloadRepository>((ref) 
 
 final unlockPayloadServiceProvider = Provider<UnlockPayloadService>((ref) {
   return UnlockPayloadService(ref.watch(unlockPayloadRepositoryProvider));
+});
+
+/// Phase 17 Collect — minimal unlock-info + collect-complete (no JWT).
+final collectUnlockRepositoryProvider =
+    Provider<CollectUnlockRepository>((ref) {
+  return CollectUnlockRepository(ref.watch(apiClientProvider));
 });
 
 final checkoutPaymentServiceProvider = Provider<CheckoutPaymentService>((ref) {

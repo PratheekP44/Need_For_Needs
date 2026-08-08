@@ -9,6 +9,7 @@ import '../models/locker_connection.dart';
 import '../models/locker_state.dart';
 import '../models/packet.dart';
 import '../transport/ble_transport.dart';
+import '../unlock/ble_unlock_engine.dart';
 import '../unlock/unlock_service.dart';
 
 /// Transport selection: Virtual MCU (dev) vs Real BLE (CC2340).
@@ -57,9 +58,17 @@ final lockerServiceProvider = Provider<LockerService>((ref) {
   return service;
 });
 
-/// Phase 14 Collect → unlock orchestrator.
+/// Shared BLE unlock engine (Demo + Collect) — single reference implementation.
+final bleUnlockEngineProvider = Provider<BleUnlockEngine>((ref) {
+  return BleUnlockEngine(locker: ref.watch(lockerServiceProvider));
+});
+
+/// Phase 14 Collect → unlock orchestrator (delegates real BLE to [BleUnlockEngine]).
 final unlockServiceProvider = Provider<UnlockService>((ref) {
-  return UnlockService(locker: ref.watch(lockerServiceProvider));
+  return UnlockService(
+    locker: ref.watch(lockerServiceProvider),
+    engine: ref.watch(bleUnlockEngineProvider),
+  );
 });
 
 /// Bluetooth adapter state stream.

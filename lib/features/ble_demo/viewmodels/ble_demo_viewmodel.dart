@@ -160,26 +160,16 @@ class BleDemoState {
   }
 }
 
-/// Engineering BLE Demo — local scan/connect/32-byte packet only.
+/// Engineering BLE Demo — UI over shared [BleUnlockEngine].
 ///
 /// Does not call payment, unlock JWT, orders, or production Collect APIs.
+/// Collect uses the same [bleUnlockEngineProvider] instance path.
 class BleDemoViewModel extends Notifier<BleDemoState> {
-  static const _builder = RealPacketBuilder();
-  static final _parser = PacketParser();
-
   StreamSubscription<bool>? _connSub;
 
-  LockerService get _locker => ref.read(lockerServiceProvider);
+  BleUnlockEngine get _engine => ref.read(bleUnlockEngineProvider);
 
-  BleConnectionManager get _ble => BleConnectionManager(
-        connection: _locker.connectionManager,
-        config: _locker.config,
-      );
-
-  FlutterBlueTransport? get _fbp {
-    final t = _locker.transport;
-    return t is FlutterBlueTransport ? t : null;
-  }
+  LockerService get _locker => _engine.locker;
 
   @override
   BleDemoState build() {
@@ -220,7 +210,6 @@ class BleDemoViewModel extends Notifier<BleDemoState> {
       BleLog.d('[BLE-DEMO] $message');
     }
     final next = [...state.logs, entry];
-    // Keep UI responsive — cap log buffer.
     final trimmed =
         next.length > 200 ? next.sublist(next.length - 200) : next;
     state = state.copyWith(logs: trimmed);
@@ -250,7 +239,7 @@ class BleDemoViewModel extends Notifier<BleDemoState> {
 
   void clearLogs() => state = state.copyWith(logs: const []);
 
-  /// SCAN — list nearby devices (prefer Real BLE for firmware testing).
+  /// SCAN — via shared [BleUnlockEngine.scan].
   Future<void> scan() async {
     state = state.copyWith(
       busy: true,
@@ -260,12 +249,7 @@ class BleDemoViewModel extends Notifier<BleDemoState> {
     );
     _log('Scan started (target=${state.lockerDeviceName})');
     try {
-      final devices = await _locker.scanForLockers().timeout(
-        const Duration(seconds: 25),
-        onTimeout: () {
-          throw TimeoutException('BLE scan timed out after 25s');
-        },
-      );
+      final devices = await _engine.scan();
       final target = state.lockerDeviceName.trim().toLowerCase();
       final matches = devices
           .where(
@@ -297,55 +281,42 @@ class BleDemoViewModel extends Notifier<BleDemoState> {
     }
   }
 
-  /// CONNECT — Scan → Find LKRM-V2 → Connect → MTU → Discover → Notify.
+  /// CONNECT — shared engine: Scan → Find LKRM-V2 → Connect → MTU → Notify.
   Future<void> connect() async {
     state = state.copyWith(busy: true, clearError: true);
     try {
       _log('Scan');
       state = state.copyWith(scanning: true, connectionLabel: 'Scanning');
-      final devices = await _locker.scanForLockers().timeout(
-        const Duration(seconds: 25),
-        onTimeout: () {
-          throw TimeoutException('BLE scan timed out after 25s');
+      final linked = await _engine.connect(
+        targetDeviceName: state.lockerDeviceName,
+        onStage: (stage) {
+          if (stage == 'connect') {
+            state = state.copyWith(
+              scanning: false,
+              connectionLabel: 'Connecting',
+            );
+          }
         },
       );
-      state = state.copyWith(devices: devices, scanning: false);
-
-      final targetName = state.lockerDeviceName.trim();
-      final device = _findTarget(devices, targetName);
-      if (device == null) {
-        throw StateError(
-          'Find $targetName — not found among ${devices.length} device(s)',
-        );
-      }
-      _log('Find $targetName → ${device.name} (${device.id})');
-
-      _log('Connect');
-      state = state.copyWith(connectionLabel: 'Connecting');
-      await _ble.connect(device);
-
-      final fbp = _fbp;
-      final mtu = fbp?.lastMtu ?? _locker.currentConnection.mtu;
+      _log('Find ${state.lockerDeviceName} → ${linked.device.name}');
       _log('Connected');
-      _log('MTU ${mtu ?? _locker.config.desiredMtu}');
-
-      final services = fbp?.discoveredServices ?? const <GattServiceInfo>[];
-      _log('Services ${services.length}');
-      for (final s in services) {
+      _log('MTU ${linked.mtu ?? '—'}');
+      _log('Services ${linked.services.length}');
+      for (final s in linked.services) {
         _log('  Service ${s.uuid}');
         for (final c in s.characteristics) {
           _log('  Characteristics ${c.uuid} ${c.properties}');
         }
       }
-      final notifyOn =
-          fbp?.pipelineNotifyEnabled ?? fbp?.linkState.notificationsEnabled;
-      _log('Notify enabled ${notifyOn == true ? 'YES' : '—'}');
+      _log('Notify enabled ${linked.notifyEnabled ? 'YES' : '—'}');
 
       state = state.copyWith(
         busy: false,
+        scanning: false,
         connected: true,
         connectionLabel: 'CONNECTED',
-        mtu: mtu,
+        mtu: linked.mtu,
+        devices: [linked.device, ...state.devices],
         clearError: true,
       );
     } catch (e) {
@@ -360,26 +331,10 @@ class BleDemoViewModel extends Notifier<BleDemoState> {
     }
   }
 
-  BleDevice? _findTarget(List<BleDevice> devices, String targetName) {
-    final needle = targetName.toLowerCase();
-    // Prefer explicit name match, then isTargetLocker via BleConnectionManager.
-    for (final d in devices) {
-      if (d.name.toLowerCase() == needle) return d;
-    }
-    for (final d in devices) {
-      if (d.name.toLowerCase().contains(needle)) return d;
-    }
-    final selected = _ble.selectLockerDevice(
-      devices.where((d) => d.isTargetLocker).toList(),
-    );
-    if (selected != null) return selected;
-    return _ble.selectLockerDevice(devices);
-  }
-
   Future<void> disconnect() async {
     state = state.copyWith(busy: true, clearError: true);
     try {
-      await _locker.disconnectSafely();
+      await _engine.disconnect();
       _log('Disconnect');
       state = state.copyWith(
         busy: false,
@@ -393,9 +348,9 @@ class BleDemoViewModel extends Notifier<BleDemoState> {
     }
   }
 
-  /// SEND PACKET — build 32-byte RealPacketBuilder packet → write → wait notify.
+  /// SEND PACKET — shared engine build + write + wait notify.
   Future<void> sendPacket() async {
-    if (!state.connected && !_locker.transport.isConnected) {
+    if (!state.connected && !_engine.isConnected) {
       state = state.copyWith(error: 'Not connected — press CONNECT first');
       _log('Errors: Not connected', isError: true);
       return;
@@ -410,12 +365,10 @@ class BleDemoViewModel extends Notifier<BleDemoState> {
 
     try {
       final request = state.packetRequest;
-      final packet = _builder.build(
+      final packet = _engine.buildPacket(
         command: request.command,
         request: request.toUnlockPacketRequest(),
       );
-
-      assert(packet.length == RealPacketBuilder.packetLength);
 
       final hex = _hex(packet);
       _log('Packet length ${packet.length}');
@@ -433,28 +386,21 @@ class BleDemoViewModel extends Notifier<BleDemoState> {
         lastPacketLength: packet.length,
       );
 
-      await _ble.writePacket(packet);
+      final parsed = await _engine.writeAndWait(packet: packet);
       _log('Write success');
-      state = state.copyWith(writeSucceeded: true);
+      _log('Notification HEX ${parsed.rawHex}');
 
-      final raw = await _ble.waitForNotification(
-        timeout: const Duration(seconds: 8),
-      );
-      final notifyHex = _hex(raw);
-      _log('Notification HEX $notifyHex');
-
-      final ascii = _toAscii(raw);
-      final parsed = _parser.parse(raw);
       final received = BleDemoReceivedData(
-        hex: notifyHex,
-        ascii: ascii,
-        length: raw.length,
+        hex: parsed.rawHex,
+        ascii: _toAscii(parsed.raw),
+        length: parsed.raw.length,
         timestamp: DateTime.now(),
         parsedKind: parsed.kind.name,
         parsedMessage: parsed.message,
       );
       state = state.copyWith(
         busy: false,
+        writeSucceeded: true,
         received: received,
       );
     } catch (e) {

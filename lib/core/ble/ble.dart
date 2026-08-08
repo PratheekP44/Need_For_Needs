@@ -39,6 +39,7 @@ export 'transport/ble_transport.dart';
 export 'transport/flutter_blue_transport.dart';
 export 'transport/mock_ble_transport.dart';
 export 'transport/virtual_mcu_transport.dart';
+export 'unlock/ble_unlock_engine.dart';
 export 'unlock/unlock_jwt_decoder.dart';
 export 'unlock/unlock_payload_service.dart';
 export 'unlock/unlock_service.dart';
