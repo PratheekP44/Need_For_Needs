@@ -185,15 +185,32 @@ class BleDemoScreen extends ConsumerWidget {
                         onChanged: vm.updatePort,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _IntField(
-                        label: 'Box Number',
-                        value: state.boxNumber,
-                        onChanged: vm.updateBox,
-                      ),
-                    ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Boxes (bitmap) — select one or more',
+                  style: AppTextStyles.caption,
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (var b = 1; b <= 32; b++)
+                      FilterChip(
+                        label: Text('$b', style: const TextStyle(fontSize: 12)),
+                        selected: state.selectedBoxes.contains(b),
+                        onSelected: (_) => vm.toggleBox(b),
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Selected: ${state.boxNumbersSorted.join(', ')}',
+                  style: AppTextStyles.caption.copyWith(color: AppColors.muted),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -222,7 +239,7 @@ class BleDemoScreen extends ConsumerWidget {
                   initialValue: state.transactionId,
                   decoration: const InputDecoration(
                     labelText: 'Transaction ID (optional)',
-                    hintText: 'max 8 ASCII on wire',
+                    hintText: 'max 6 ASCII on wire',
                     isDense: true,
                     border: OutlineInputBorder(),
                   ),
@@ -231,7 +248,7 @@ class BleDemoScreen extends ConsumerWidget {
                 const SizedBox(height: 8),
                 Text(
                   'Opcode 0x${state.effectiveCommand.toRadixString(16).padLeft(2, '0').toUpperCase()} · '
-                  '32-byte RealPacketBuilder (no Phase-10 / JSON)',
+                  '32-byte RealPacketBuilder (bitmap Bytes[2..5], no Phase-10 / JSON)',
                   style: AppTextStyles.caption.copyWith(color: AppColors.muted),
                 ),
               ],

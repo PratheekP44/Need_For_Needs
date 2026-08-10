@@ -335,12 +335,12 @@ class BleUnlockEngine {
   }
 
   static void _logUnlockRequest(UnlockPacketRequest request) {
-    BleLog.d('── BleUnlockEngine.unlockOpen (dynamic) ───────');
+    BleLog.d('── BleUnlockEngine.unlockOpen (Phase 20) ───────');
     BleLog.d('Order ID: ${request.orderId}');
     BleLog.d('Locker ID: ${request.lockerId}');
     BleLog.d('Terminal: ${request.terminalNumber}');
     BleLog.d('Port: ${request.port}');
-    BleLog.d('Box: ${request.effectiveBoxNumber}');
+    BleLog.d('Boxes: ${request.effectiveBoxNumbers}');
     BleLog.d('Item ID: ${request.itemId ?? ''}');
     BleLog.d('Transaction ID: ${request.transactionId}');
     BleLog.d('──────────────────────────────────────────────');

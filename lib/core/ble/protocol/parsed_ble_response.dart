@@ -71,8 +71,7 @@ class ParsedBleResponse {
 
 /// Inputs required to build an unlock packet (Phase-10 or firmware 32-byte).
 ///
-/// Production Collect flow must build this only via
-/// [UnlockPayload.toUnlockPacketRequest] (backend is source of truth).
+/// Production Collect builds this from backend unlock-info (no Unlock JWT).
 /// Optional fields remain for tests / future encryption support.
 class UnlockPacketRequest {
   const UnlockPacketRequest({
@@ -83,6 +82,7 @@ class UnlockPacketRequest {
     required this.collectionToken,
     required this.port,
     this.boxNumber,
+    this.boxNumbers,
     this.terminalNumber = 1,
     this.itemId,
     this.portId,
@@ -107,16 +107,19 @@ class UnlockPacketRequest {
   /// Box label from payment/order (e.g. `BOX-03`, `3`, `Box 4`).
   final String boxId;
 
-  /// Numeric port expected by firmware (Box N → Port N).
+  /// Firmware Byte[1] Port — from backend/order (not the box bitmap).
   final int port;
 
-  /// Explicit box number for firmware Byte[2]; defaults to [port].
+  /// Single box number (legacy / single-line orders). Prefer [boxNumbers].
   final int? boxNumber;
 
-  /// Terminal / locker unit number for firmware Byte[3].
+  /// All boxes to unlock via the 4-byte firmware bitmap (Phase 20).
+  final List<int>? boxNumbers;
+
+  /// Firmware Byte[6] Terminal — from locker.terminalNumber.
   final int terminalNumber;
 
-  /// Catalog / stock item id for firmware Bytes[12..19].
+  /// Catalog / stock item id for firmware Item ID field.
   final String? itemId;
 
   /// Alias for [boxId] when firmware speaks in “port” terms.
@@ -149,8 +152,16 @@ class UnlockPacketRequest {
   String get effectivePortId =>
       (portId != null && portId!.isNotEmpty) ? portId! : boxId;
 
-  /// Firmware Byte[2] — box number (defaults to port).
+  /// Primary box number for logging / Phase-10 paths.
   int get effectiveBoxNumber => boxNumber ?? port;
+
+  /// Boxes for the Phase 20 unlock bitmap (deduped later by mask builder).
+  List<int> get effectiveBoxNumbers {
+    if (boxNumbers != null && boxNumbers!.isNotEmpty) {
+      return List<int>.from(boxNumbers!);
+    }
+    return [effectiveBoxNumber];
+  }
 
   /// Parse box labels like `4`, `BOX-04`, `Box 3` → port number.
   static int portFromBoxId(String boxId) {

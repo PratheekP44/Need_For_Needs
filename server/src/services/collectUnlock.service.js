@@ -28,13 +28,29 @@ function resolveLockerDoc(order) {
   return order.locker && typeof order.locker === 'object' ? order.locker : null;
 }
 
-function resolveFirstLine(order) {
-  return Array.isArray(order.items) && order.items.length ? order.items[0] : null;
+/**
+ * Collect all physical box numbers from order lines (Phase 20 multi-box).
+ * Deduplicates; validates firmware range 1–32.
+ */
+function resolveBoxNumbers(order) {
+  const lines = Array.isArray(order.items) ? order.items : [];
+  const seen = new Set();
+  const boxes = [];
+  for (const line of lines) {
+    const boxDoc = line?.box && typeof line.box === 'object' ? line.box : null;
+    const n =
+      parsePositiveInt(boxDoc?.boxNumber, { max: 32 }) ||
+      parsePositiveInt(boxDoc?.boxId, { max: 32 });
+    if (n == null) continue;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    boxes.push(n);
+  }
+  return boxes;
 }
 
-function resolveBoxDoc(order) {
-  const line = resolveFirstLine(order);
-  return line?.box && typeof line.box === 'object' ? line.box : null;
+function resolveFirstLine(order) {
+  return Array.isArray(order.items) && order.items.length ? order.items[0] : null;
 }
 
 function assertOwner(auth, order) {
@@ -53,11 +69,10 @@ function assertReadyForCollect(order) {
 }
 
 /**
- * Phase 18 — dynamic unlock info for Collect (no Unlock JWT).
+ * Phase 20 — dynamic unlock info for Collect (no Unlock JWT).
  *
- * Authorizes: owner, payment/ready status, locker+box+terminal present.
- * Returns order-sourced boxNumber / terminalNumber — never hardcodes Port=1.
- * Does NOT require bluetoothAddress, advertisementId, or JWT secret.
+ * Returns order-sourced port, terminalNumber, and boxNumbers[] for the
+ * firmware 4-byte unlock bitmap. Never hardcodes Port/Box/Terminal = 1.
  */
 class CollectUnlockService {
   async getUnlockInfo(auth, orderId) {
@@ -69,13 +84,11 @@ class CollectUnlockService {
     assertReadyForCollect(order);
 
     const locker = resolveLockerDoc(order);
-    const box = resolveBoxDoc(order);
     const line = resolveFirstLine(order);
+    const boxNumbers = resolveBoxNumbers(order);
 
     const resolvedOrderId = String(order._id);
     const lockerId = locker?.lockerId || line?.locker?.lockerId || '';
-    const boxNumber =
-      parsePositiveInt(box?.boxNumber) || parsePositiveInt(box?.boxId);
     const terminalNumber = parsePositiveInt(locker?.terminalNumber);
 
     const item = line?.item && typeof line.item === 'object' ? line.item : null;
@@ -87,7 +100,7 @@ class CollectUnlockService {
     if (!lockerId) {
       throw new AppError('Order locker id is missing', 422);
     }
-    if (boxNumber == null) {
+    if (!boxNumbers.length) {
       throw new AppError('Order box / port information is missing', 422);
     }
     if (terminalNumber == null) {
@@ -101,8 +114,10 @@ class CollectUnlockService {
       order.transaction || order.gatewayPaymentId || order.orderNumber || '',
     ).trim();
 
-    // Firmware contract: Port == Box. Never hardcode 1 — DB is source of truth.
-    const port = boxNumber;
+    // Port from first/primary box when app model treats Port ≈ Box.
+    // Never hardcode 1 — DB is source of truth.
+    const port = boxNumbers[0];
+    const boxNumber = boxNumbers[0];
 
     logger.info(
       {
@@ -110,11 +125,12 @@ class CollectUnlockService {
         lockerId,
         terminalNumber,
         boxNumber,
+        boxNumbers,
         port,
         itemId,
         transactionId,
       },
-      'unlock-info issued (dynamic Phase 18, no JWT)',
+      'unlock-info issued (Phase 20 multi-box bitmap, no JWT)',
     );
 
     return {
@@ -123,6 +139,7 @@ class CollectUnlockService {
       lockerId,
       terminalNumber,
       boxNumber,
+      boxNumbers,
       port,
       itemId,
       transactionId,

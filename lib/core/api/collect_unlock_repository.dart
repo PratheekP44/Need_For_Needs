@@ -5,14 +5,15 @@ import 'api_client.dart';
 
 /// Minimal BLE unlock fields from backend authorization (no Unlock JWT).
 ///
-/// Phase 18 — all Port / Box / Terminal values come from the order/locker DB.
-/// Nothing is hardcoded to 1.
+/// Phase 20 — Port, Terminal, and boxNumbers come from the order/locker DB.
+/// Box selection uses the 4-byte firmware bitmap (never hardcoded).
 class CollectUnlockInfo {
   const CollectUnlockInfo({
     required this.orderId,
     required this.lockerId,
     required this.terminalNumber,
-    required this.boxNumber,
+    required this.port,
+    required this.boxNumbers,
     this.itemId = '',
     this.transactionId = '',
     this.orderNumber = '',
@@ -21,29 +22,34 @@ class CollectUnlockInfo {
   final String orderId;
   final String lockerId;
 
-  /// Firmware Byte[3] — from locker.terminalNumber.
+  /// Firmware Byte[6] — locker.terminalNumber.
   final int terminalNumber;
 
-  /// Firmware Byte[1] and Byte[2] — from order box.boxNumber (Port = Box).
-  final int boxNumber;
+  /// Firmware Byte[1] Port — from backend (may equal primary box).
+  final int port;
+
+  /// Physical boxes to unlock (1–32) → 4-byte bitmap.
+  final List<int> boxNumbers;
 
   final String itemId;
   final String transactionId;
   final String orderNumber;
 
-  /// Firmware Port equals Box for current controller firmware.
-  int get port => boxNumber;
+  /// Primary box for UI (first assigned).
+  int get boxNumber => boxNumbers.isNotEmpty ? boxNumbers.first : 0;
 
   /// Build [UnlockPacketRequest] for [BleUnlockEngine] / [RealPacketBuilder].
-  ///
-  /// Mapping (dynamic from order — never hardcoded):
-  /// - port = boxNumber
-  /// - box = boxNumber
-  /// - terminal = terminalNumber
-  /// - orderId / itemId / transactionId from order
   UnlockPacketRequest toUnlockPacketRequest() {
-    if (boxNumber < 1 || boxNumber > 255) {
-      throw StateError('Invalid boxNumber from order: $boxNumber');
+    if (boxNumbers.isEmpty) {
+      throw StateError('boxNumbers must not be empty');
+    }
+    for (final b in boxNumbers) {
+      if (b < 1 || b > 32) {
+        throw StateError('Invalid boxNumber from order: $b (must be 1–32)');
+      }
+    }
+    if (port < 1 || port > 255) {
+      throw StateError('Invalid port from order: $port');
     }
     if (terminalNumber < 1 || terminalNumber > 255) {
       throw StateError('Invalid terminalNumber from locker: $terminalNumber');
@@ -58,24 +64,26 @@ class CollectUnlockInfo {
             ? orderNumber.trim()
             : orderId.trim());
 
+    final primary = boxNumbers.first;
     final request = UnlockPacketRequest(
       transactionId: tx,
       orderId: orderId.trim(),
       lockerId: lockerId.trim(),
-      boxId: '$boxNumber',
+      boxId: '$primary',
       collectionToken: 'collect', // unused by RealPacketBuilder
-      port: boxNumber,
-      boxNumber: boxNumber,
+      port: port,
+      boxNumber: primary,
+      boxNumbers: List<int>.from(boxNumbers),
       terminalNumber: terminalNumber,
       itemId: itemId.trim().isEmpty ? null : itemId.trim(),
     );
 
-    BleLog.d('── DYNAMIC COLLECT UNLOCK (Phase 18) ───────────');
+    BleLog.d('── DYNAMIC COLLECT UNLOCK (Phase 20) ───────────');
     BleLog.d('Order ID: ${request.orderId}');
     BleLog.d('Locker ID: ${request.lockerId}');
     BleLog.d('Terminal: ${request.terminalNumber}');
     BleLog.d('Port: ${request.port}');
-    BleLog.d('Box: ${request.effectiveBoxNumber}');
+    BleLog.d('Boxes: ${request.effectiveBoxNumbers}');
     BleLog.d('Item ID: ${request.itemId ?? ''}');
     BleLog.d('Transaction ID: ${request.transactionId}');
     BleLog.d('──────────────────────────────────────────────');
@@ -84,12 +92,13 @@ class CollectUnlockInfo {
   }
 
   factory CollectUnlockInfo.fromJson(Map<String, dynamic> json) {
-    final terminal = _positiveInt(json['terminalNumber']);
-    // Prefer boxNumber; accept port only if box missing (still DB-sourced).
-    final box = _positiveInt(json['boxNumber']) ?? _positiveInt(json['port']);
-    if (terminal == null || box == null) {
+    final terminal = _positiveInt(json['terminalNumber'], max: 255);
+    final port = _positiveInt(json['port'], max: 255) ??
+        _positiveInt(json['boxNumber'], max: 32);
+    final boxes = _parseBoxNumbers(json);
+    if (terminal == null || port == null || boxes.isEmpty) {
       throw const FormatException(
-        'unlock-info missing terminalNumber / boxNumber',
+        'unlock-info missing terminalNumber / port / boxNumbers',
       );
     }
     final orderId = asString(json['orderId'])?.trim() ?? '';
@@ -101,21 +110,39 @@ class CollectUnlockInfo {
       orderId: orderId,
       lockerId: lockerId,
       terminalNumber: terminal,
-      boxNumber: box,
+      port: port,
+      boxNumbers: boxes,
       itemId: asString(json['itemId'])?.trim() ?? '',
       transactionId: asString(json['transactionId'])?.trim() ?? '',
       orderNumber: asString(json['orderNumber'])?.trim() ?? '',
     );
   }
 
-  static int? _positiveInt(dynamic value) {
-    if (value is int) return value > 0 && value <= 255 ? value : null;
+  static List<int> _parseBoxNumbers(Map<String, dynamic> json) {
+    final raw = json['boxNumbers'];
+    final out = <int>[];
+    final seen = <int>{};
+    if (raw is List) {
+      for (final e in raw) {
+        final n = _positiveInt(e, max: 32);
+        if (n != null && seen.add(n)) out.add(n);
+      }
+    }
+    if (out.isEmpty) {
+      final single = _positiveInt(json['boxNumber'], max: 32);
+      if (single != null) out.add(single);
+    }
+    return out;
+  }
+
+  static int? _positiveInt(dynamic value, {required int max}) {
+    if (value is int) return value > 0 && value <= max ? value : null;
     if (value is num) {
       final n = value.toInt();
-      return n > 0 && n <= 255 ? n : null;
+      return n > 0 && n <= max ? n : null;
     }
     final parsed = int.tryParse('$value');
-    if (parsed == null || parsed <= 0 || parsed > 255) return null;
+    if (parsed == null || parsed <= 0 || parsed > max) return null;
     return parsed;
   }
 }

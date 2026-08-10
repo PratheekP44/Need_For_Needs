@@ -2,13 +2,13 @@ import '../../../core/ble/ble.dart';
 
 /// Local packet fields for BLE Demo Mode (no backend / JWT).
 ///
-/// Maps onto [UnlockPacketRequest] solely so [RealPacketBuilder] can fill the
-/// fixed 32-byte firmware layout. Production Collect must not use this path.
+/// Maps onto [UnlockPacketRequest] so [RealPacketBuilder] fills the Phase 20
+/// 32-byte firmware layout (including 4-byte box bitmap).
 class BleDemoPacketRequest {
   const BleDemoPacketRequest({
     required this.command,
     required this.port,
-    required this.boxNumber,
+    required this.boxNumbers,
     required this.terminalNumber,
     this.orderId = '',
     this.itemId = '',
@@ -19,21 +19,23 @@ class BleDemoPacketRequest {
   final int command;
 
   final int port;
-  final int boxNumber;
+  final List<int> boxNumbers;
   final int terminalNumber;
   final String orderId;
   final String itemId;
   final String transactionId;
 
   UnlockPacketRequest toUnlockPacketRequest() {
+    final boxes = boxNumbers.isEmpty ? const [1] : boxNumbers;
     return UnlockPacketRequest(
       transactionId: transactionId,
       orderId: orderId,
       lockerId: 'DEMO',
-      boxId: '$boxNumber',
+      boxId: '${boxes.first}',
       collectionToken: 'demo',
       port: port,
-      boxNumber: boxNumber,
+      boxNumber: boxes.first,
+      boxNumbers: boxes,
       terminalNumber: terminalNumber,
       itemId: itemId.isEmpty ? null : itemId,
     );
@@ -42,7 +44,7 @@ class BleDemoPacketRequest {
   BleDemoPacketRequest copyWith({
     int? command,
     int? port,
-    int? boxNumber,
+    List<int>? boxNumbers,
     int? terminalNumber,
     String? orderId,
     String? itemId,
@@ -51,7 +53,7 @@ class BleDemoPacketRequest {
     return BleDemoPacketRequest(
       command: command ?? this.command,
       port: port ?? this.port,
-      boxNumber: boxNumber ?? this.boxNumber,
+      boxNumbers: boxNumbers ?? this.boxNumbers,
       terminalNumber: terminalNumber ?? this.terminalNumber,
       orderId: orderId ?? this.orderId,
       itemId: itemId ?? this.itemId,

@@ -184,8 +184,8 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
       setState(() {
         _unlockInfo = info;
         _stage =
-            'Opening Port ${info.port} / Box ${info.boxNumber} '
-            '(Terminal ${info.terminalNumber})…';
+            'Opening boxes ${info.boxNumbers.join(', ')} '
+            '(Port ${info.port}, Terminal ${info.terminalNumber})…';
       });
 
       // Same BLE engine as Admin BLE Demo — only packet values differ.
@@ -199,9 +199,9 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
               'scan' => 'Scanning for LKRM-V2…',
               'connect' => 'Connecting…',
               'connected' =>
-                'Connected — unlocking box ${info.boxNumber}…',
+                'Connected — unlocking boxes ${info.boxNumbers.join(', ')}…',
               'open' =>
-                'Sending OPEN (port=${info.port}, box=${info.boxNumber})…',
+                'Sending OPEN (port=${info.port}, boxes=${info.boxNumbers})…',
               'success' => 'Locker Opened Successfully',
               _ => _stage,
             };
@@ -235,7 +235,7 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
         _busy = false;
         _opened = true;
         _stage = backendOk
-            ? 'Box ${info.boxNumber} opened successfully'
+            ? 'Boxes ${info.boxNumbers.join(', ')} opened successfully'
             : 'Box opened — server confirm failed';
         _error =
             backendOk ? null : 'Backend authorization failed (collect-complete)';
@@ -246,7 +246,7 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
           SnackBar(
             content: Text(
               backendOk
-                  ? 'Box ${info.boxNumber} opened'
+                  ? 'Boxes ${info.boxNumbers.join(', ')} opened'
                   : 'Locker opened — could not mark order collected',
             ),
           ),
@@ -349,7 +349,7 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
                       Text(
                         'Terminal ${_unlockInfo!.terminalNumber} · '
                         'Port ${_unlockInfo!.port} · '
-                        'Box ${_unlockInfo!.boxNumber}',
+                        'Boxes ${_unlockInfo!.boxNumbers.join(', ')}',
                         style: AppTextStyles.label,
                       ),
                       if (_unlockInfo!.itemId.isNotEmpty) ...[

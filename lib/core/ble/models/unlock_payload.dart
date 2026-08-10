@@ -232,6 +232,7 @@ class UnlockPayload {
       collectionToken: unlockToken,
       port: port,
       boxNumber: boxNumber,
+      boxNumbers: [boxNumber],
       terminalNumber: terminalId,
       itemId: itemId,
       bluetoothAddress: bluetoothAddress,

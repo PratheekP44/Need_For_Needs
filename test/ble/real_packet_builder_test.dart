@@ -4,79 +4,152 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:need_for_needs/core/ble/ble.dart';
 
 void main() {
-  group('RealPacketBuilder', () {
-    test('builds exactly 32 bytes with fixed field layout', () {
-      const builder = RealPacketBuilder();
-      const request = UnlockPacketRequest(
-        transactionId: 'TX12345678',
-        orderId: 'ORD-0001',
-        lockerId: 'LCK-02',
-        boxId: 'BOX-03',
-        port: 3,
-        boxNumber: 3,
-        terminalNumber: 2,
-        itemId: 'ITEM0042',
-        collectionToken: 'CE1.ORD-0001.LCK-02.BOX-03.1893456000.deadbeef',
+  group('BoxUnlockMask.buildBoxUnlockMask', () {
+    test('single boxes', () {
+      expect(BoxUnlockMask.buildBoxUnlockMask([1]), 0x00000001);
+      expect(BoxUnlockMask.buildBoxUnlockMask([2]), 0x00000002);
+      expect(BoxUnlockMask.buildBoxUnlockMask([3]), 0x00000004);
+      expect(BoxUnlockMask.buildBoxUnlockMask([5]), 0x00000010);
+      expect(BoxUnlockMask.buildBoxUnlockMask([8]), 0x00000080);
+      expect(BoxUnlockMask.buildBoxUnlockMask([16]), 0x00008000);
+      expect(BoxUnlockMask.buildBoxUnlockMask([31]), 0x40000000);
+      expect(BoxUnlockMask.buildBoxUnlockMask([32]), 0x80000000);
+    });
+
+    test('multi-box combinations', () {
+      expect(BoxUnlockMask.buildBoxUnlockMask([1, 3, 5]), 0x00000015);
+      expect(BoxUnlockMask.buildBoxUnlockMask([2, 5, 8]), 0x00000092);
+      expect(BoxUnlockMask.buildBoxUnlockMask([1, 3, 5, 32]), 0x80000015);
+    });
+
+    test('deduplicates boxes', () {
+      expect(BoxUnlockMask.buildBoxUnlockMask([1, 1, 3, 3, 5]), 0x00000015);
+    });
+
+    test('rejects empty / invalid', () {
+      expect(() => BoxUnlockMask.buildBoxUnlockMask([]), throwsArgumentError);
+      expect(() => BoxUnlockMask.buildBoxUnlockMask([0]), throwsArgumentError);
+      expect(() => BoxUnlockMask.buildBoxUnlockMask([33]), throwsArgumentError);
+    });
+
+    test('all 32 boxes', () {
+      final boxes = List<int>.generate(32, (i) => i + 1);
+      final mask = BoxUnlockMask.buildBoxUnlockMask(boxes);
+      expect(mask, 0xFFFFFFFF);
+    });
+  });
+
+  group('BoxUnlockMask.encodeBoxMask32', () {
+    test('little-endian: Box 1 → first byte 0x01', () {
+      final bytes = BoxUnlockMask.encodeBoxMask32(0x00000001);
+      expect(bytes.length, 4);
+      expect(bytes, [0x01, 0x00, 0x00, 0x00]);
+    });
+
+    test('little-endian: Box 32 → last byte 0x80', () {
+      final bytes = BoxUnlockMask.encodeBoxMask32(0x80000000);
+      expect(bytes, [0x00, 0x00, 0x00, 0x80]);
+    });
+
+    test('little-endian: 0x00000015 → 15 00 00 00', () {
+      final bytes = BoxUnlockMask.encodeBoxMask32(0x00000015);
+      expect(bytes, [0x15, 0x00, 0x00, 0x00]);
+    });
+  });
+
+  group('RealPacketBuilder Phase 20 layout', () {
+    const builder = RealPacketBuilder();
+
+    UnlockPacketRequest req({
+      int port = 5,
+      List<int> boxes = const [5],
+      int terminal = 1,
+      String orderId = 'ORD-0001',
+      String itemId = 'ITEM0042',
+      String tx = 'TX1234',
+    }) {
+      return UnlockPacketRequest(
+        transactionId: tx,
+        orderId: orderId,
+        lockerId: 'LCK-01',
+        boxId: '${boxes.first}',
+        port: port,
+        boxNumber: boxes.first,
+        boxNumbers: boxes,
+        terminalNumber: terminal,
+        itemId: itemId,
+        collectionToken: 'collect',
       );
+    }
 
-      final packet = builder.buildOpen(request);
-
-      expect(packet.length, RealPacketBuilder.packetLength);
+    test('packet length exactly 32', () {
+      final packet = builder.buildOpen(req());
       expect(packet.length, 32);
+    });
 
-      expect(packet[0], FirmwareCommand.open); // Command
-      expect(packet[1], 3); // Port
-      expect(packet[2], 3); // Box
-      expect(packet[3], 2); // Terminal
-
-      // Order ID "ORD-0001" at bytes 4..11
+    test('Box 5 layout fields', () {
+      final packet = builder.buildOpen(req(port: 5, boxes: const [5]));
+      expect(packet[0], FirmwareCommand.open);
+      expect(packet[1], 5); // Port
+      // Bitmap LE for 0x00000010
+      expect(packet.sublist(2, 6), [0x10, 0x00, 0x00, 0x00]);
+      expect(packet[6], 1); // Terminal
       expect(
-        String.fromCharCodes(packet.sublist(4, 12)).replaceAll('\u0000', ''),
+        String.fromCharCodes(packet.sublist(7, 15)).replaceAll('\u0000', ''),
         'ORD-0001',
       );
-      // Item ID
       expect(
-        String.fromCharCodes(packet.sublist(12, 20)).replaceAll('\u0000', ''),
+        String.fromCharCodes(packet.sublist(15, 23)).replaceAll('\u0000', ''),
         'ITEM0042',
       );
-      // Transaction ID truncated/padded to 8
       expect(
-        String.fromCharCodes(packet.sublist(20, 28)).replaceAll('\u0000', ''),
-        'TX123456',
+        String.fromCharCodes(packet.sublist(23, 29)).replaceAll('\u0000', ''),
+        'TX1234',
       );
-      // Reserved
-      expect(packet[28], 0);
       expect(packet[29], 0);
-
-      // Checksum = placeholder over body[0..29]
       final body = Uint8List.sublistView(packet, 0, 30);
       final expected = computeChecksumPlaceholder(body);
       final actual = ByteData.sublistView(packet).getUint16(30, Endian.big);
       expect(actual, expected);
     });
 
-    test('unused app-data bytes are 0x00', () {
-      const builder = RealPacketBuilder();
-      const request = UnlockPacketRequest(
-        transactionId: 'T',
-        orderId: 'O',
-        lockerId: 'L1',
-        boxId: '1',
-        port: 1,
-        collectionToken: 'CE1.O.L1.1.1893456000.deadbeef',
+    test('Box 1 bitmap bytes', () {
+      final packet = builder.buildOpen(req(port: 1, boxes: const [1]));
+      expect(packet.sublist(2, 6), [0x01, 0x00, 0x00, 0x00]);
+    });
+
+    test('multi-box [1,3,5] bitmap', () {
+      final packet =
+          builder.buildOpen(req(port: 1, boxes: const [1, 3, 5]));
+      expect(packet.sublist(2, 6), [0x15, 0x00, 0x00, 0x00]);
+    });
+
+    test('checksum changes when bitmap changes', () {
+      final a = builder.buildOpen(req(boxes: const [1]));
+      final b = builder.buildOpen(req(boxes: const [5]));
+      expect(a.sublist(30, 32), isNot(equals(b.sublist(30, 32))));
+    });
+
+    test('changing terminal changes packet', () {
+      final a = builder.buildOpen(req(terminal: 1));
+      final b = builder.buildOpen(req(terminal: 2));
+      expect(a[6], 1);
+      expect(b[6], 2);
+      expect(a, isNot(equals(b)));
+    });
+
+    test('changing order ID changes packet', () {
+      final a = builder.buildOpen(req(orderId: 'AAAA'));
+      final b = builder.buildOpen(req(orderId: 'BBBB'));
+      expect(a, isNot(equals(b)));
+    });
+
+    test('transaction ID truncated to 6 bytes', () {
+      final packet = builder.buildOpen(req(tx: 'ABCDEFGH'));
+      expect(
+        String.fromCharCodes(packet.sublist(23, 29)),
+        'ABCDEF',
       );
-      final packet = builder.buildOpen(request);
-      expect(packet.length, 32);
-      expect(packet[0], FirmwareCommand.open);
-      expect(packet[1], 1);
-      expect(packet[2], 1);
-      expect(packet[3], 1);
-      // Only first ASCII byte of each field set; rest of field + reserved = 0
-      expect(packet[5], 0);
-      expect(packet[13], 0);
-      expect(packet[21], 0);
-      expect(packet[28], 0);
-      expect(packet[29], 0);
     });
   });
 }

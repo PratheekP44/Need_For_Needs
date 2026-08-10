@@ -53,7 +53,7 @@ class BleDemoState {
     this.customOpcode = 0xFF,
     this.terminalNumber = 1,
     this.portNumber = 1,
-    this.boxNumber = 1,
+    this.selectedBoxes = const {1},
     this.orderId = '',
     this.itemId = '',
     this.transactionId = '',
@@ -78,7 +78,7 @@ class BleDemoState {
   final int customOpcode;
   final int terminalNumber;
   final int portNumber;
-  final int boxNumber;
+  final Set<int> selectedBoxes;
   final String orderId;
   final String itemId;
   final String transactionId;
@@ -93,10 +93,15 @@ class BleDemoState {
       ? customOpcode & 0xff
       : commandKind.defaultOpcode;
 
+  List<int> get boxNumbersSorted {
+    final list = selectedBoxes.toList()..sort();
+    return list;
+  }
+
   BleDemoPacketRequest get packetRequest => BleDemoPacketRequest(
         command: effectiveCommand,
         port: portNumber,
-        boxNumber: boxNumber,
+        boxNumbers: boxNumbersSorted.isEmpty ? const [1] : boxNumbersSorted,
         terminalNumber: terminalNumber,
         orderId: orderId,
         itemId: itemId,
@@ -119,7 +124,7 @@ class BleDemoState {
     int? customOpcode,
     int? terminalNumber,
     int? portNumber,
-    int? boxNumber,
+    Set<int>? selectedBoxes,
     String? orderId,
     String? itemId,
     String? transactionId,
@@ -145,7 +150,7 @@ class BleDemoState {
       customOpcode: customOpcode ?? this.customOpcode,
       terminalNumber: terminalNumber ?? this.terminalNumber,
       portNumber: portNumber ?? this.portNumber,
-      boxNumber: boxNumber ?? this.boxNumber,
+      selectedBoxes: selectedBoxes ?? this.selectedBoxes,
       orderId: orderId ?? this.orderId,
       itemId: itemId ?? this.itemId,
       transactionId: transactionId ?? this.transactionId,
@@ -228,7 +233,17 @@ class BleDemoViewModel extends Notifier<BleDemoState> {
 
   void updatePort(int v) => state = state.copyWith(portNumber: v);
 
-  void updateBox(int v) => state = state.copyWith(boxNumber: v);
+  void toggleBox(int box) {
+    if (box < 1 || box > 32) return;
+    final next = Set<int>.from(state.selectedBoxes);
+    if (next.contains(box)) {
+      if (next.length == 1) return; // keep at least one box
+      next.remove(box);
+    } else {
+      next.add(box);
+    }
+    state = state.copyWith(selectedBoxes: next);
+  }
 
   void updateOrderId(String v) => state = state.copyWith(orderId: v);
 
