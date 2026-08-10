@@ -63,6 +63,26 @@ class NfnTokens extends ThemeExtension<NfnTokens> {
     brandGradient: AppColors.brandGradient,
   );
 
+  static const dark = NfnTokens(
+    surfaceAccent: AppColors.secondaryDark,
+    surfaceMuted: AppColors.secondaryDark,
+    primaryText: AppColors.cream,
+    secondaryText: AppColors.warmGray,
+    divider: AppColors.warmGray,
+    success: AppColors.cream,
+    warning: AppColors.warmGray,
+    stockHealthy: AppColors.cream,
+    stockHealthyBg: AppColors.secondaryDark,
+    stockHealthyFg: AppColors.cream,
+    stockLow: AppColors.warmGray,
+    stockLowBg: AppColors.secondaryDark,
+    stockLowFg: AppColors.warmGray,
+    stockOut: AppColors.cream,
+    stockOutBg: AppColors.primaryDark,
+    stockOutFg: AppColors.cream,
+    brandGradient: AppColors.brandGradient,
+  );
+
   @override
   NfnTokens copyWith({
     Color? surfaceAccent,

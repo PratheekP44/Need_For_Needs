@@ -17,6 +17,11 @@ const {
 const { formatItem } = require('./item.service');
 const inventoryEvents = require('./inventory.events');
 const logger = require('../config/logger');
+const {
+  PENDING_COLLECTION_STATUSES,
+  expireOrderIfNeeded,
+  isPendingCollection,
+} = require('./orderExpiration.service');
 
 function formatNested(doc, fields) {
   if (!doc) return null;
@@ -28,12 +33,28 @@ function formatNested(doc, fields) {
   return out;
 }
 
+function formatUser(user) {
+  if (!user) return null;
+  if (typeof user !== 'object') return user;
+  return {
+    id: user._id || user.id,
+    name: user.name || '',
+    email: user.email || '',
+    phone: user.phone || '',
+  };
+}
+
 function formatOrder(order) {
   return {
     id: order._id,
     orderNumber: order.orderNumber,
-    user: order.user,
-    locker: formatNested(order.locker, ['lockerId', 'lockerName', 'status']),
+    user: formatUser(order.user) || order.user,
+    locker: formatNested(order.locker, [
+      'lockerId',
+      'lockerName',
+      'status',
+      'terminalNumber',
+    ]),
     items: (order.items || []).map((line) => ({
       quantity: line.quantity,
       priceAtPurchase: line.priceAtPurchase,
@@ -59,9 +80,13 @@ function formatOrder(order) {
     collectionToken: order.collectionToken || '',
     collectionTokenExpiresAt: order.collectionTokenExpiresAt || null,
     stockReserved: order.stockReserved,
-    expiresAt: order.expiresAt,
-    cancelledAt: order.cancelledAt,
-    collectedAt: order.collectedAt,
+    expiresAt: order.expiresAt || null,
+    paidAt: order.paidAt || null,
+    collectionDeadline: order.collectionDeadline || null,
+    cancelledAt: order.cancelledAt || null,
+    collectedAt: order.collectedAt || null,
+    expiredAt: order.expiredAt || null,
+    deletedAt: order.deletedAt || null,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
   };
@@ -70,6 +95,33 @@ function formatOrder(order) {
 function getOrderExpiryMs() {
   const minutes = Number(process.env.ORDER_RESERVATION_MINUTES || 15);
   return Math.max(1, minutes) * 60 * 1000;
+}
+
+function assertNotDeleted(order) {
+  if (order?.deletedAt) {
+    throw new AppError('Order not found', 404);
+  }
+}
+
+async function releaseReservedStock(order, reason, actorId) {
+  if (!order.stockReserved) return;
+  await releaseStockForLines(order.items, {
+    userId: actorId || order.user,
+    orderNumber: order.orderNumber,
+    reason,
+  });
+  inventoryEvents.publish({
+    reason:
+      reason === 'cancel'
+        ? 'order_cancelled'
+        : reason === 'expire'
+          ? 'order_expired'
+          : reason,
+    orderNumber: order.orderNumber,
+    stockIds: (order.items || [])
+      .map((line) => String(line.stock?._id || line.stock || ''))
+      .filter(Boolean),
+  });
 }
 
 class OrderService {
@@ -171,7 +223,15 @@ class OrderService {
   async listOrders(auth, query) {
     const listQuery = parseListQuery(query, {
       defaultSort: '-createdAt',
-      allowedSortFields: ['createdAt', 'updatedAt', 'grandTotal', 'status', 'orderNumber'],
+      allowedSortFields: [
+        'createdAt',
+        'updatedAt',
+        'grandTotal',
+        'status',
+        'orderNumber',
+        'paidAt',
+        'collectionDeadline',
+      ],
       filterFields: {
         status: 'status',
         paymentStatus: 'paymentStatus',
@@ -197,44 +257,51 @@ class OrderService {
     };
   }
 
-  async getOrder(auth, id) {
-    const order = await orderRepository.findByIdOrOrderNumber(id);
+  async getOrder(auth, id, opts = {}) {
+    let order = await orderRepository.findByIdOrOrderNumber(id);
     if (!order) {
       throw new AppError('Order not found', 404);
     }
-    if (auth.role !== 'admin' && String(order.user) !== String(auth.sub)) {
+    assertNotDeleted(order);
+    if (auth.role !== 'admin' && String(order.user?._id || order.user) !== String(auth.sub)) {
       throw new AppError('Forbidden', 403);
     }
+
+    order = await expireOrderIfNeeded(order, {
+      now: opts.now,
+      persist: (oid, data) => orderRepository.updateById(oid, data),
+    });
+
     return formatOrder(order);
   }
 
-  async cancelOrder(auth, id) {
+  /**
+   * Cancel order.
+   * - Users: unpaid only (CREATED / WAITING_PAYMENT)
+   * - Admin: unpaid OR pending collection (no BLE / no refund automation)
+   */
+  async cancelOrder(auth, id, { reason } = {}) {
     const order = await orderRepository.findByIdOrOrderNumber(id);
     if (!order) {
       throw new AppError('Order not found', 404);
     }
-    if (auth.role !== 'admin' && String(order.user) !== String(auth.sub)) {
+    assertNotDeleted(order);
+    if (auth.role !== 'admin' && String(order.user?._id || order.user) !== String(auth.sub)) {
       throw new AppError('Forbidden', 403);
     }
 
-    if (!['CREATED', 'WAITING_PAYMENT'].includes(order.status)) {
-      throw new AppError('Only unpaid orders can be cancelled', 400);
+    const unpaidOk = ['CREATED', 'WAITING_PAYMENT'].includes(order.status);
+    const adminPendingOk =
+      auth.role === 'admin' && isPendingCollection(order.status);
+
+    if (!unpaidOk && !adminPendingOk) {
+      if (auth.role !== 'admin' && isPendingCollection(order.status)) {
+        throw new AppError('Unauthorized admin cancellation', 403);
+      }
+      throw new AppError('Order cannot be cancelled in its current state', 400);
     }
 
-    if (order.stockReserved) {
-      await releaseStockForLines(order.items, {
-        userId: auth.sub,
-        orderNumber: order.orderNumber,
-        reason: 'cancel',
-      });
-      inventoryEvents.publish({
-        reason: 'order_cancelled',
-        orderNumber: order.orderNumber,
-        stockIds: (order.items || [])
-          .map((line) => String(line.stock?._id || line.stock || ''))
-          .filter(Boolean),
-      });
-    }
+    await releaseReservedStock(order, 'cancel', auth.sub);
 
     const updated = await orderRepository.updateById(order._id, {
       status: 'CANCELLED',
@@ -248,41 +315,122 @@ class OrderService {
       entityId: order._id,
       userId: auth.role === 'user' ? auth.sub : null,
       adminId: auth.role === 'admin' ? auth.sub : null,
-      metadata: { orderNumber: order.orderNumber },
+      metadata: {
+        orderNumber: order.orderNumber,
+        reason: reason || null,
+        paymentStatus: order.paymentStatus,
+        refundNote:
+          order.paymentStatus === 'SUCCESS'
+            ? 'Cancellation does not auto-refund; handle refund separately'
+            : null,
+      },
     });
 
     return formatOrder(updated);
   }
 
-  async expireDueOrders() {
-    const due = await orderRepository.findExpiredPending(new Date());
+  /**
+   * Soft-delete eligible orders (admin only).
+   * Eligible: EXPIRED, CANCELLED. Never COLLECTED / pending collection / unpaid active.
+   * Does not delete Payment or Transaction documents.
+   */
+  async deleteOrder(auth, id) {
+    if (auth.role !== 'admin') {
+      throw new AppError('Unauthorized admin deletion', 403);
+    }
+
+    const order = await orderRepository.findByIdOrOrderNumber(id);
+    if (!order) {
+      throw new AppError('Order not found', 404);
+    }
+    assertNotDeleted(order);
+
+    if (!['EXPIRED', 'CANCELLED'].includes(order.status)) {
+      throw new AppError(
+        'Only expired or cancelled orders can be deleted. Prefer cancel for pending collection.',
+        400,
+      );
+    }
+
+    const updated = await orderRepository.updateById(order._id, {
+      deletedAt: new Date(),
+    });
+
+    await activityService.log({
+      action: 'order_delete',
+      entity: 'Order',
+      entityId: order._id,
+      adminId: auth.sub,
+      metadata: {
+        orderNumber: order.orderNumber,
+        status: order.status,
+        paymentPreserved: Boolean(order.payment),
+        transactionPreserved: Boolean(order.transaction),
+      },
+    });
+
+    return formatOrder(updated);
+  }
+
+  async expireDueOrders(opts = {}) {
+    const now = typeof opts.now === 'function' ? opts.now() : opts.now || new Date();
     let count = 0;
 
-    for (const order of due) {
+    const unpaidDue = await orderRepository.findExpiredPending(now);
+    for (const order of unpaidDue) {
       try {
-        if (order.stockReserved) {
-          await releaseStockForLines(order.items, {
-            userId: order.user,
-            orderNumber: order.orderNumber,
-            reason: 'expire',
-          });
-        }
-
+        await releaseReservedStock(order, 'expire', order.user);
         await orderRepository.updateById(order._id, {
           status: 'EXPIRED',
+          expiredAt: now,
           stockReserved: false,
         });
-
         await activityService.log({
           action: 'order_expire',
           entity: 'Order',
           entityId: order._id,
           userId: order.user,
-          metadata: { orderNumber: order.orderNumber },
+          metadata: {
+            orderNumber: order.orderNumber,
+            reason: 'unpaid_reservation',
+          },
         });
         count += 1;
       } catch (error) {
-        logger.error('Failed to expire order', {
+        logger.error('Failed to expire unpaid order', {
+          orderNumber: order.orderNumber,
+          message: error.message,
+        });
+      }
+    }
+
+    const collectionDue = await orderRepository.findExpiredCollectionPending(now);
+    for (const order of collectionDue) {
+      try {
+        await expireOrderIfNeeded(order, {
+          now: () => now,
+          persist: async (oid, data) => {
+            await releaseReservedStock(order, 'expire', order.user);
+            return orderRepository.updateById(oid, {
+              ...data,
+              stockReserved: false,
+            });
+          },
+        });
+        await activityService.log({
+          action: 'order_expire',
+          entity: 'Order',
+          entityId: order._id,
+          userId: order.user,
+          metadata: {
+            orderNumber: order.orderNumber,
+            reason: 'collection_deadline',
+            collectionDeadline: order.collectionDeadline,
+          },
+        });
+        count += 1;
+      } catch (error) {
+        logger.error('Failed to expire collection order', {
           orderNumber: order.orderNumber,
           message: error.message,
         });
@@ -295,3 +443,4 @@ class OrderService {
 
 module.exports = new OrderService();
 module.exports.formatOrder = formatOrder;
+module.exports.PENDING_COLLECTION_STATUSES = PENDING_COLLECTION_STATUSES;

@@ -366,6 +366,13 @@ class PaymentService {
       tx = await transactionRepository.updateById(tx._id, { status: 'success' });
     }
 
+    // Phase 23 — collection window starts at successful payment verification (server UTC).
+    const {
+      computeCollectionDeadline,
+    } = require('./orderExpiration.service');
+    const paidAt = new Date();
+    const collectionDeadline = computeCollectionDeadline(paidAt);
+
     const updatedOrder = await orderRepository.updateById(orderDoc._id, {
       status: 'READY_FOR_COLLECTION',
       paymentStatus: 'SUCCESS',
@@ -375,6 +382,8 @@ class PaymentService {
       gatewayPaymentId: razorpayPaymentId,
       collectionToken: token,
       collectionTokenExpiresAt: tokenExpiry,
+      paidAt,
+      collectionDeadline,
     });
 
     inventoryEvents.publish({

@@ -25,15 +25,11 @@ class PageScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(title),
         automaticallyImplyLeading: showBack,
         actions: actions,
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        foregroundColor: scheme.onSurface,
       ),
       floatingActionButton: floatingActionButton,
       bottomNavigationBar: bottom == null

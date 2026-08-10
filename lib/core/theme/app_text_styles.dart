@@ -42,6 +42,6 @@ class AppTextStyles {
   static TextStyle get label => GoogleFonts.plusJakartaSans(
         fontSize: 13,
         fontWeight: FontWeight.w600,
-        color: AppColors.primary,
+        color: AppColors.primaryDark,
       );
 }

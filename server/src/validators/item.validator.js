@@ -3,6 +3,49 @@
 const { body, param, query } = require('express-validator');
 const { ITEM_CATEGORIES, ITEM_UNITS } = require('../models/enums');
 
+/**
+ * imageUrl: optional. Empty/null OK.
+ * Absolute http(s) URLs OK.
+ * Relative /uploads/... paths OK (legacy local uploads).
+ */
+function optionalImageUrl() {
+  return body('imageUrl')
+    .optional({ values: 'null' })
+    .customSanitizer((value) => {
+      if (value === undefined || value === null) return value;
+      if (typeof value !== 'string') return value;
+      return value.trim();
+    })
+    .custom((value) => {
+      if (value === undefined || value === null || value === '') {
+        return true;
+      }
+      if (typeof value !== 'string') {
+        throw new Error('imageUrl must be a string');
+      }
+      if (value.length > 1000) {
+        throw new Error('Image URL cannot exceed 1000 characters');
+      }
+      // Preserve server-relative upload paths from multipart image upload.
+      if (value.startsWith('/uploads/')) {
+        return true;
+      }
+      let parsed;
+      try {
+        parsed = new URL(value);
+      } catch {
+        throw new Error('imageUrl must be a valid HTTP/HTTPS URL');
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('imageUrl must be a valid HTTP/HTTPS URL');
+      }
+      if (!parsed.hostname) {
+        throw new Error('imageUrl must be a valid HTTP/HTTPS URL');
+      }
+      return true;
+    });
+}
+
 const createItemValidator = [
   body('itemId').trim().notEmpty().isLength({ min: 2, max: 50 }),
   body('name').trim().notEmpty().isLength({ min: 2, max: 150 }),
@@ -10,7 +53,7 @@ const createItemValidator = [
   body('category').isIn(ITEM_CATEGORIES),
   body('brand').trim().notEmpty().isLength({ max: 100 }),
   body('barcode').trim().notEmpty().isLength({ max: 64 }),
-  body('imageUrl').optional().isString().isLength({ max: 1000 }),
+  optionalImageUrl(),
   body('sellingPrice').isFloat({ min: 0 }).toFloat(),
   body('costPrice').isFloat({ min: 0 }).toFloat(),
   body('gstPercentage').optional().isFloat({ min: 0, max: 100 }).toFloat(),
@@ -34,7 +77,7 @@ const updateItemValidator = [
   body('category').optional().isIn(ITEM_CATEGORIES),
   body('brand').optional().trim().isLength({ max: 100 }),
   body('barcode').optional().trim().isLength({ max: 64 }),
-  body('imageUrl').optional().isString().isLength({ max: 1000 }),
+  optionalImageUrl(),
   body('sellingPrice').optional().isFloat({ min: 0 }).toFloat(),
   body('costPrice').optional().isFloat({ min: 0 }).toFloat(),
   body('gstPercentage').optional().isFloat({ min: 0, max: 100 }).toFloat(),

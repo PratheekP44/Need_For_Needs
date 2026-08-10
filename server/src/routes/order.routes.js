@@ -48,6 +48,15 @@ router.put(
   orderController.cancelOrder,
 );
 
+router.delete(
+  '/orders/:id',
+  authenticate,
+  authorize('admin'),
+  orderIdParamValidator,
+  validate,
+  orderController.deleteOrder,
+);
+
 router.post(
   '/orders/:id/unlock-payload',
   authenticate,

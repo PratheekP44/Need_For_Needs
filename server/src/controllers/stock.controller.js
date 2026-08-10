@@ -12,6 +12,15 @@ const listStock = asyncHandler(async (req, res) => {
   });
 });
 
+const listPhysicalInventory = asyncHandler(async (req, res) => {
+  const data = await stockService.listPhysicalInventory(req.query);
+  res.status(200).json({
+    success: true,
+    message: 'Physical box inventory fetched successfully',
+    data,
+  });
+});
+
 const getStock = asyncHandler(async (req, res) => {
   const stock = await stockService.getStockById(req.params.id);
   res.status(200).json({
@@ -77,6 +86,7 @@ const moveStock = asyncHandler(async (req, res) => {
 
 module.exports = {
   listStock,
+  listPhysicalInventory,
   getStock,
   createStock,
   createStockBatch,

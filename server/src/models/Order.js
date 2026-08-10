@@ -131,7 +131,18 @@ const orderSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    /** Unpaid reservation deadline (checkout window). Not the collection window. */
     expiresAt: {
+      type: Date,
+      default: null,
+    },
+    /** Server time when payment was successfully verified. */
+    paidAt: {
+      type: Date,
+      default: null,
+    },
+    /** paidAt + collection window (default 2h). Authority for collection expiry. */
+    collectionDeadline: {
       type: Date,
       default: null,
     },
@@ -140,6 +151,16 @@ const orderSchema = new mongoose.Schema(
       default: null,
     },
     collectedAt: {
+      type: Date,
+      default: null,
+    },
+    /** Server time when status became EXPIRED (unpaid or collection window). */
+    expiredAt: {
+      type: Date,
+      default: null,
+    },
+    /** Soft-delete timestamp — preserves payment/transaction history. */
+    deletedAt: {
       type: Date,
       default: null,
     },
@@ -184,7 +205,9 @@ orderSchema.index({ orderNumber: 1 }, { unique: true });
 orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ locker: 1, status: 1 });
 orderSchema.index({ status: 1, expiresAt: 1 });
+orderSchema.index({ status: 1, collectionDeadline: 1 });
 orderSchema.index({ paymentStatus: 1, createdAt: -1 });
+orderSchema.index({ deletedAt: 1, createdAt: -1 });
 
 const Order = mongoose.models.Order || mongoose.model('Order', orderSchema);
 

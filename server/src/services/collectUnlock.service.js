@@ -4,6 +4,10 @@ const orderRepository = require('../repositories/order.repository');
 const AppError = require('../utils/AppError');
 const { formatOrder } = require('./order.service');
 const logger = require('../config/logger');
+const {
+  expireOrderIfNeeded,
+  assertCollectible,
+} = require('./orderExpiration.service');
 
 /**
  * Parses a positive int from locker / box labels (`LCK-01`, `BOX-03`, `3`).
@@ -54,18 +58,42 @@ function resolveFirstLine(order) {
 }
 
 function assertOwner(auth, order) {
-  if (auth.role !== 'admin' && String(order.user) !== String(auth.sub)) {
+  if (
+    auth.role !== 'admin' &&
+    String(order.user?._id || order.user) !== String(auth.sub)
+  ) {
     throw new AppError('Forbidden', 403);
   }
 }
 
-function assertReadyForCollect(order) {
-  if (!['READY_FOR_COLLECTION', 'PAYMENT_SUCCESS'].includes(order.status)) {
-    throw new AppError(
-      `Order is not ready for unlock (status=${order.status})`,
-      400,
-    );
+function assertNotDeleted(order) {
+  if (order?.deletedAt) {
+    throw new AppError('Order not found', 404);
   }
+}
+
+/**
+ * Expire if needed, then enforce collect eligibility (server clock).
+ */
+async function prepareCollectableOrder(auth, orderId, opts = {}) {
+  let order = await orderRepository.findByIdOrOrderNumberForUnlock(orderId);
+  if (!order) {
+    // Fallback without BLE populate for markCollected path.
+    order = await orderRepository.findByIdOrOrderNumber(orderId);
+  }
+  if (!order) {
+    throw new AppError('Order not found', 404);
+  }
+  assertNotDeleted(order);
+  assertOwner(auth, order);
+
+  order = await expireOrderIfNeeded(order, {
+    now: opts.now,
+    persist: (oid, data) => orderRepository.updateById(oid, data),
+  });
+
+  assertCollectible(order, { now: opts.now });
+  return order;
 }
 
 /**
@@ -73,15 +101,12 @@ function assertReadyForCollect(order) {
  *
  * Returns order-sourced port, terminalNumber, and boxNumbers[] for the
  * firmware 4-byte unlock bitmap. Never hardcodes Port/Box/Terminal = 1.
+ *
+ * Phase 23 — collectionDeadline enforced before any unlock data is returned.
  */
 class CollectUnlockService {
-  async getUnlockInfo(auth, orderId) {
-    const order = await orderRepository.findByIdOrOrderNumberForUnlock(orderId);
-    if (!order) {
-      throw new AppError('Order not found', 404);
-    }
-    assertOwner(auth, order);
-    assertReadyForCollect(order);
+  async getUnlockInfo(auth, orderId, opts = {}) {
+    const order = await prepareCollectableOrder(auth, orderId, opts);
 
     const locker = resolveLockerDoc(order);
     const line = resolveFirstLine(order);
@@ -129,6 +154,7 @@ class CollectUnlockService {
         port,
         itemId,
         transactionId,
+        collectionDeadline: order.collectionDeadline,
       },
       'unlock-info issued (Phase 20 multi-box bitmap, no JWT)',
     );
@@ -143,24 +169,33 @@ class CollectUnlockService {
       port,
       itemId,
       transactionId,
+      paidAt: order.paidAt || null,
+      collectionDeadline: order.collectionDeadline || null,
+      status: order.status,
     };
   }
 
   /**
    * Mark order COLLECTED after successful BLE unlock on device.
+   * Re-validates deadline so an expired order cannot be marked collected.
    */
-  async markCollected(auth, orderId) {
-    const order = await orderRepository.findByIdOrOrderNumber(orderId);
+  async markCollected(auth, orderId, opts = {}) {
+    let order = await orderRepository.findByIdOrOrderNumber(orderId);
     if (!order) {
       throw new AppError('Order not found', 404);
     }
+    assertNotDeleted(order);
     assertOwner(auth, order);
 
     if (order.status === 'COLLECTED') {
       return formatOrder(order);
     }
 
-    assertReadyForCollect(order);
+    order = await expireOrderIfNeeded(order, {
+      now: opts.now,
+      persist: (oid, data) => orderRepository.updateById(oid, data),
+    });
+    assertCollectible(order, { now: opts.now });
 
     const updated = await orderRepository.updateById(order._id, {
       status: 'COLLECTED',

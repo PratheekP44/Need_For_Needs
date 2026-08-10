@@ -371,6 +371,23 @@ class CatalogRepository {
     return asList(data['stock']).map((e) => mapStockToInventory(asMap(e))).toList();
   }
 
+  /// Phase 24 — one row per physical box (including empty).
+  Future<PhysicalLockerInventory> listPhysicalInventory({
+    String? lockerId,
+    String occupancy = 'all',
+    String? itemId,
+  }) async {
+    final query = <String, String>{
+      'occupancy': occupancy,
+      if (lockerId != null && lockerId.isNotEmpty) 'locker': lockerId,
+      if (itemId != null && itemId.isNotEmpty) 'item': itemId,
+    };
+    final data = asMap(
+      await _api.get('/stock/physical-inventory', query: query),
+    );
+    return mapPhysicalLockerInventory(data);
+  }
+
   Future<List<Map<String, dynamic>>> listItems() async {
     final data = asMap(await _api.get('/items', query: {'limit': '100'}));
     return asList(data['items']).map((e) => asMap(e)).toList();
@@ -641,6 +658,20 @@ class OrderRepository {
       if (discount > 0) 'discount': discount,
     }));
     return data.containsKey('order') ? asMap(data['order']) : data;
+  }
+
+  Future<OrderSummary> cancel(String id, {String? reason}) async {
+    final data = asMap(await _api.put('/orders/$id/cancel', body: {
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
+    }));
+    final order = data.containsKey('order') ? asMap(data['order']) : data;
+    return mapOrder(order);
+  }
+
+  Future<OrderSummary> deleteOrder(String id) async {
+    final data = asMap(await _api.delete('/orders/$id'));
+    final order = data.containsKey('order') ? asMap(data['order']) : data;
+    return mapOrder(order);
   }
 }
 

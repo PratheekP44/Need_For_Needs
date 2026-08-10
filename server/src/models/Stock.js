@@ -35,12 +35,15 @@ const stockSchema = new mongoose.Schema(
       type: Number,
       required: [true, 'Current quantity is required'],
       min: [0, 'Current quantity cannot be negative'],
+      max: [1, 'Each physical box holds at most one item'],
       default: 0,
     },
     maximumQuantity: {
       type: Number,
       required: [true, 'Maximum quantity is required'],
       min: [1, 'Maximum quantity must be at least 1'],
+      max: [1, 'Each physical box holds at most one item'],
+      default: 1,
     },
     reorderLevel: {
       type: Number,

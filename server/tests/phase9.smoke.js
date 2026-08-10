@@ -116,12 +116,12 @@ async function main() {
     token: adminToken,
     body: {
       lockerId: `RP-${String(stamp).slice(-6)}`,
-      lockerName: 'Razorpay Test Locker',
+      lockerName: 'Razorpay Smoke Ephemeral',
       latitude: 12.97,
       longitude: 77.59,
       status: 'ACTIVE',
       totalBoxes: 2,
-      description: 'razorpay-test',
+      description: 'Ephemeral smoke-test locker — deleted at end of phase9.smoke.js',
     },
   });
   assert(locker.status === 201, `locker ${JSON.stringify(locker.json)}`);

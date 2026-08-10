@@ -10,6 +10,7 @@ const {
   moveStockValidator,
   stockIdParamValidator,
   listStockValidator,
+  listPhysicalInventoryValidator,
 } = require('../validators/stock.validator');
 const validate = require('../middlewares/validate');
 const { authenticate, authorize } = require('../middlewares/auth.middleware');
@@ -24,6 +25,15 @@ router.get(
   listStockValidator,
   validate,
   stockController.listStock,
+);
+
+// Phase 24 — one row per physical box (including empty). Must be before /:id.
+router.get(
+  '/physical-inventory',
+  authorize('admin'),
+  listPhysicalInventoryValidator,
+  validate,
+  stockController.listPhysicalInventory,
 );
 
 router.post(

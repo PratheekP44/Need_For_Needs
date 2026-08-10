@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -12,6 +13,7 @@ import '../../../core/payment/checkout_payment_service.dart';
 import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../core/utils/collection_countdown.dart';
 import '../../../core/widgets/page_scaffold.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
@@ -140,6 +142,100 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
   String? _error;
   bool _opened = false;
   CollectUnlockInfo? _unlockInfo;
+  OrderSummary? _order;
+  bool _loadingOrder = true;
+  Timer? _countdownTimer;
+  String _countdown = '';
+  bool _deadlineReached = false;
+  bool _refreshingExpired = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(_loadOrder);
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadOrder() async {
+    final payment = ref.read(lastPaymentResultProvider);
+    final orderId = orderIdForUnlock(payment, null);
+    setState(() {
+      _loadingOrder = true;
+      _error = null;
+    });
+    try {
+      OrderSummary? order;
+      if (orderId.isNotEmpty) {
+        order = await ref.read(orderRepositoryProvider).getById(orderId);
+      } else {
+        final orders = await ref.read(orderRepositoryProvider).list();
+        order = orders.isEmpty ? null : orders.first;
+      }
+      if (!mounted) return;
+      setState(() {
+        _order = order;
+        _loadingOrder = false;
+      });
+      _startCountdown(order);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingOrder = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  void _startCountdown(OrderSummary? order) {
+    _countdownTimer?.cancel();
+    _deadlineReached = false;
+    if (order == null || !order.isPendingCollection || order.collectionDeadline == null) {
+      setState(() => _countdown = '');
+      return;
+    }
+    void tick() {
+      if (!mounted) return;
+      final deadline = order.collectionDeadline!;
+      final remaining = collectionRemaining(deadline: deadline);
+      final text = formatCollectionCountdown(remaining);
+      final reached = remaining.inSeconds <= 0;
+      setState(() {
+        _countdown = text;
+        _deadlineReached = reached;
+      });
+      if (reached && !_refreshingExpired) {
+        _countdownTimer?.cancel();
+        _refreshOrderFromBackend();
+      }
+    }
+
+    tick();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) => tick());
+  }
+
+  Future<void> _refreshOrderFromBackend() async {
+    if (_refreshingExpired) return;
+    _refreshingExpired = true;
+    try {
+      final id = _order?.mongoId.isNotEmpty == true
+          ? _order!.mongoId
+          : (_order?.id ?? '');
+      if (id.isEmpty) return;
+      final refreshed = await ref.read(orderRepositoryProvider).getById(id);
+      if (!mounted) return;
+      setState(() => _order = refreshed);
+      _startCountdown(refreshed);
+    } catch (_) {
+      // Keep local countdown-at-zero UI; next collect attempt is server-gated.
+    } finally {
+      _refreshingExpired = false;
+    }
+  }
 
   Future<void> _openLocker({
     required OrderPaymentResult? payment,
@@ -147,11 +243,29 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
   }) async {
     if (_busy) return;
 
+    final live = _order ?? order;
+    if (live != null && (live.isExpired || _deadlineReached)) {
+      setState(() {
+        _error = 'Collection expired';
+        _stage = 'Collection expired';
+      });
+      await _refreshOrderFromBackend();
+      return;
+    }
+    if (live != null && (live.isCancelled || live.isCollected)) {
+      setState(() {
+        _error = live.isCancelled ? 'Order cancelled' : 'Order already collected';
+      });
+      return;
+    }
+
     final orderId = payment?.orderId.isNotEmpty == true
         ? payment!.orderId
         : (payment?.orderNumber.isNotEmpty == true
             ? payment!.orderNumber
-            : (order?.id ?? ''));
+            : (live?.mongoId.isNotEmpty == true
+                ? live!.mongoId
+                : (live?.id ?? '')));
 
     if (orderId.isEmpty) {
       setState(() {
@@ -176,6 +290,7 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
       }
 
       // Phase 18 — order DB is source of truth (no Unlock JWT, no hardcoded 1).
+      // Phase 23 — unlock-info enforces collectionDeadline server-side.
       final collectApi = ref.read(collectUnlockRepositoryProvider);
       final info = await collectApi.fetchUnlockInfo(orderId: orderId);
       final request = info.toUnlockPacketRequest();
@@ -252,6 +367,7 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
           ),
         );
       }
+      await _refreshOrderFromBackend();
     } catch (e) {
       if (!mounted) return;
       final message = _friendlyCollectError(e);
@@ -260,12 +376,18 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
         _error = message;
         _stage = 'Error';
       });
+      if (message.toLowerCase().contains('expired')) {
+        await _refreshOrderFromBackend();
+      }
     }
   }
 
   static String _friendlyCollectError(Object e) {
     final text = e.toString();
     final lower = text.toLowerCase();
+    if (lower.contains('expired')) return 'Collection expired';
+    if (lower.contains('cancelled')) return 'Order cancelled';
+    if (lower.contains('already collected')) return 'Order already collected';
     if (lower.contains('403') || lower.contains('forbidden')) {
       return 'Backend authorization failed';
     }
@@ -282,173 +404,245 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
     return text;
   }
 
+  String _formatLocal(DateTime? utc) {
+    if (utc == null) return '—';
+    final local = utc.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final payment = ref.watch(lastPaymentResultProvider);
-    final orders = ref.watch(_latestOrderProvider);
+    final order = _order;
+    final id = payment?.orderNumber ?? order?.id ?? '—';
+    final lockerName = payment?.lockerName ?? order?.lockerName ?? 'Locker';
+    final lockerNumber = payment?.lockerNumber ?? order?.lockerNumber ?? '—';
+    final boxes = payment?.boxes.isNotEmpty == true
+        ? payment!.boxes
+        : (order?.boxes ?? const <String>[]);
+    final hasOrder = orderIdForUnlock(payment, order).isNotEmpty;
+    final expired =
+        order?.isExpired == true || _deadlineReached || order?.status == 'Expired';
+    final blocked = expired ||
+        order?.isCancelled == true ||
+        order?.isCollected == true ||
+        _opened;
+    final collectEnabled = hasOrder && !blocked && !_busy && !_loadingOrder;
 
-    return orders.when(
-      loading: () => const PageScaffold(
-        title: 'Collect item',
-        body: Center(child: CircularProgressIndicator()),
-      ),
-      error: (e, _) => PageScaffold(
-        title: 'Collect item',
-        body: Center(child: Text('$e')),
-      ),
-      data: (order) {
-        final id = payment?.orderNumber ?? order?.id ?? '—';
-        final lockerName = payment?.lockerName ?? order?.lockerName ?? 'Locker';
-        final lockerNumber =
-            payment?.lockerNumber ?? order?.lockerNumber ?? '—';
-        final boxes = payment?.boxes.isNotEmpty == true
-            ? payment!.boxes
-            : (order?.boxes ?? const <String>[]);
-        final hasOrder = orderIdForUnlock(payment, order).isNotEmpty;
-
-        return PageScaffold(
-          title: 'Collect item',
-          bottom: PrimaryButton(
-            label: _busy
-                ? 'Working…'
-                : _opened
-                    ? 'Opened'
+    return PageScaffold(
+      title: 'Collect item',
+      bottom: PrimaryButton(
+        label: _busy
+            ? 'Working…'
+            : _opened
+                ? 'Opened'
+                : expired
+                    ? 'Collection expired'
                     : 'Open Locker',
-            icon: _busy
-                ? Icons.hourglass_top
-                : _opened
-                    ? Icons.check_circle
+        icon: _busy
+            ? Icons.hourglass_top
+            : _opened
+                ? Icons.check_circle
+                : expired
+                    ? Icons.timer_off_outlined
                     : Icons.lock_open_rounded,
-            onPressed: _busy || _opened || !hasOrder
-                ? null
-                : () => _openLocker(payment: payment, order: order),
-          ),
-          body: ListView(
-            children: [
-              SoftPanel(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Order number', style: AppTextStyles.caption),
-                    const SizedBox(height: 4),
-                    Text(id, style: AppTextStyles.title),
-                    const SizedBox(height: 16),
-                    Text('Locker number', style: AppTextStyles.caption),
-                    const SizedBox(height: 4),
-                    Text(lockerNumber, style: AppTextStyles.title),
-                    const SizedBox(height: 4),
-                    Text(
-                      lockerName,
-                      style: AppTextStyles.body
-                          .copyWith(color: AppColors.muted),
-                    ),
-                    if (_unlockInfo != null) ...[
-                      const SizedBox(height: 16),
-                      Text('Unlock target (from order)', style: AppTextStyles.caption),
-                      const SizedBox(height: 8),
+        onPressed: collectEnabled
+            ? () => _openLocker(payment: payment, order: order)
+            : null,
+      ),
+      body: _loadingOrder
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              children: [
+                SoftPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Order number', style: AppTextStyles.caption),
+                      const SizedBox(height: 4),
+                      Text(id, style: AppTextStyles.title),
+                      const SizedBox(height: 12),
+                      Text('Order status', style: AppTextStyles.caption),
+                      const SizedBox(height: 4),
                       Text(
-                        'Terminal ${_unlockInfo!.terminalNumber} · '
-                        'Port ${_unlockInfo!.port} · '
-                        'Boxes ${_unlockInfo!.boxNumbers.join(', ')}',
+                        order?.status ?? '—',
                         style: AppTextStyles.label,
                       ),
-                      if (_unlockInfo!.itemId.isNotEmpty) ...[
+                      if (order?.paidAt != null) ...[
+                        const SizedBox(height: 12),
+                        Text('Paid', style: AppTextStyles.caption),
                         const SizedBox(height: 4),
                         Text(
-                          'Item ${_unlockInfo!.itemId}',
+                          _formatLocal(order!.paidAt),
+                          style: AppTextStyles.body,
+                        ),
+                      ],
+                      if (order?.collectionDeadline != null) ...[
+                        const SizedBox(height: 12),
+                        Text('Collection deadline', style: AppTextStyles.caption),
+                        const SizedBox(height: 4),
+                        Text(
+                          _formatLocal(order!.collectionDeadline),
+                          style: AppTextStyles.body,
+                        ),
+                      ],
+                      if (order?.isPendingCollection == true &&
+                          order?.collectionDeadline != null) ...[
+                        const SizedBox(height: 16),
+                        Text('Collect within', style: AppTextStyles.caption),
+                        const SizedBox(height: 4),
+                        Text(
+                          expired ? 'Collection expired' : _countdown,
+                          style: AppTextStyles.headline.copyWith(
+                            fontSize: 28,
+                            color: expired ? AppColors.error : AppColors.primary,
+                          ),
+                        ),
+                      ],
+                      if (order?.isCollected == true) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          'Collected ${_formatLocal(order!.collectedAt)}',
+                          style: AppTextStyles.body
+                              .copyWith(color: AppColors.success),
+                        ),
+                      ],
+                      if (order?.isExpired == true) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          'Collection expired',
+                          style: AppTextStyles.body
+                              .copyWith(color: AppColors.error),
+                        ),
+                      ],
+                      if (order?.isCancelled == true) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          'Order cancelled',
+                          style: AppTextStyles.body
+                              .copyWith(color: AppColors.error),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      Text('Locker number', style: AppTextStyles.caption),
+                      const SizedBox(height: 4),
+                      Text(lockerNumber, style: AppTextStyles.title),
+                      const SizedBox(height: 4),
+                      Text(
+                        lockerName,
+                        style: AppTextStyles.body
+                            .copyWith(color: AppColors.muted),
+                      ),
+                      if (_unlockInfo != null) ...[
+                        const SizedBox(height: 16),
+                        Text('Unlock target (from order)',
+                            style: AppTextStyles.caption),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Terminal ${_unlockInfo!.terminalNumber} · '
+                          'Port ${_unlockInfo!.port} · '
+                          'Boxes ${_unlockInfo!.boxNumbers.join(', ')}',
+                          style: AppTextStyles.label,
+                        ),
+                        if (_unlockInfo!.itemId.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Item ${_unlockInfo!.itemId}',
+                            style: AppTextStyles.caption
+                                .copyWith(color: AppColors.muted),
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text('Boxes to open', style: AppTextStyles.title),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: (boxes.isEmpty ? const ['—'] : boxes)
+                      .map(
+                        (box) => Container(
+                          width: 88,
+                          height: 88,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceMuted,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Text(
+                            box,
+                            style: AppTextStyles.headline.copyWith(fontSize: 22),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 24),
+                SoftPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _opened
+                            ? 'Box opened. Retrieve your items and close the door.'
+                            : expired
+                                ? 'Collection window has ended. Open Locker is disabled.'
+                                : 'Stand near LKRM-V2 and tap Open Locker. '
+                                    'The app loads Port / Box / Terminal from your order, '
+                                    'then uses the same BLE engine as Admin BLE Demo.',
+                        style: AppTextStyles.body.copyWith(
+                          color: _opened
+                              ? AppColors.success
+                              : expired
+                                  ? AppColors.error
+                                  : AppColors.muted,
+                        ),
+                      ),
+                      if (_stage.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        if (_busy)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 8),
+                            child: LinearProgressIndicator(),
+                          ),
+                        Text(_stage, style: AppTextStyles.label),
+                      ],
+                      if (!hasOrder) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          'No order id available — unlock cannot start.',
                           style: AppTextStyles.caption
-                              .copyWith(color: AppColors.muted),
+                              .copyWith(color: AppColors.error),
+                        ),
+                      ],
+                      if (_error != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _error!,
+                          style: AppTextStyles.caption
+                              .copyWith(color: AppColors.error),
                         ),
                       ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
-              Text('Boxes to open', style: AppTextStyles.title),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: (boxes.isEmpty ? const ['—'] : boxes)
-                    .map(
-                      (box) => Container(
-                        width: 88,
-                        height: 88,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceMuted,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: Text(
-                          box,
-                          style: AppTextStyles.headline.copyWith(fontSize: 22),
-                        ),
-                      ),
-                    )
-                    .toList(),
-              ),
-              const SizedBox(height: 24),
-              SoftPanel(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _opened
-                          ? 'Box opened. Retrieve your items and close the door.'
-                          : 'Stand near LKRM-V2 and tap Open Locker. '
-                              'The app loads Port / Box / Terminal from your order, '
-                              'then uses the same BLE engine as Admin BLE Demo.',
-                      style: AppTextStyles.body.copyWith(
-                        color: _opened ? AppColors.success : AppColors.muted,
-                      ),
-                    ),
-                    if (_stage.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      if (_busy)
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 8),
-                          child: LinearProgressIndicator(),
-                        ),
-                      Text(_stage, style: AppTextStyles.label),
-                    ],
-                    if (!hasOrder) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        'No order id available — unlock cannot start.',
-                        style: AppTextStyles.caption
-                            .copyWith(color: AppColors.error),
-                      ),
-                    ],
-                    if (_error != null) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        _error!,
-                        style: AppTextStyles.caption
-                            .copyWith(color: AppColors.error),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+              ],
+            ),
     );
   }
 }
-
-final _latestOrderProvider = FutureProvider((ref) async {
-  if (!ref.watch(authSessionProvider).isAuthenticated) return null;
-  final orders = await ref.read(orderRepositoryProvider).list();
-  return orders.isEmpty ? null : orders.first;
-});
 
 /// Prefer mongo order id, then order number, then latest order id.
 String orderIdForUnlock(OrderPaymentResult? payment, OrderSummary? order) {
   if (payment?.orderId.isNotEmpty == true) return payment!.orderId;
   if (payment?.orderNumber.isNotEmpty == true) return payment!.orderNumber;
+  if (order?.mongoId.isNotEmpty == true) return order!.mongoId;
   return order?.id ?? '';
 }
+

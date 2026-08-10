@@ -55,7 +55,11 @@ async function repairBrokenRefs() {
 }
 
 async function ensureDemoLocker(adminId) {
-  let locker = await Locker.findOne({ status: 'ACTIVE' }) || await Locker.findOne();
+  // Prefer Campus Gate; never create a second demo locker if it exists.
+  let locker =
+    (await Locker.findOne({ lockerId: 'LCK-DEMO-06742' })) ||
+    (await Locker.findOne({ status: 'ACTIVE' })) ||
+    (await Locker.findOne());
   if (locker) {
     const boxCount = await Box.countDocuments({ locker: locker._id });
     if (boxCount > 0) return locker;
@@ -121,9 +125,10 @@ async function seedDemo(adminId) {
       box: emptyBox._id,
       item: item.id,
       locker: lockerMongoId,
-      currentQuantity: 8,
-      maximumQuantity: 20,
-      reorderLevel: 2,
+      // Unit-box model: exactly one item in this physical box.
+      currentQuantity: 1,
+      maximumQuantity: 1,
+      reorderLevel: 0,
     },
     adminId,
   );

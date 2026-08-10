@@ -1,95 +1,89 @@
 import 'package:flutter/material.dart';
 
-/// NeedForNeeds design tokens — single source of truth for brand colors.
+/// NeedForNeeds design tokens — approved four-color palette.
 ///
-/// Widgets must consume these tokens (or [ThemeData] / [ColorScheme] mapped
-/// from them). Do not hardcode hex colors in UI code.
+/// Primary dark `#222831` · Secondary dark `#393E46` ·
+/// Warm gray `#948979` · Cream `#DFD0B8`
+///
+/// Widgets must consume these tokens (or [ThemeData] / [ColorScheme]).
+/// Do not hardcode hex colors in UI code.
 class AppColors {
   const AppColors._();
 
-  // ── Brand ──────────────────────────────────────────────────────────────
-  /// Primary brand red-orange.
-  static const Color primary = Color(0xFFE73F1E);
+  // ── Approved palette (source of truth) ─────────────────────────────────
+  static const Color primaryDark = Color(0xFF222831);
+  static const Color secondaryDark = Color(0xFF393E46);
+  static const Color warmGray = Color(0xFF948979);
+  static const Color cream = Color(0xFFDFD0B8);
 
-  /// Warm orange used for secondary emphasis / lighter brand stops.
-  static const Color primaryLight = Color(0xFFFB6C00);
-
-  /// Secondary brand orange.
-  static const Color secondary = Color(0xFFFB6C00);
-
-  /// Accent gold.
-  static const Color accent = Color(0xFFF9B637);
-
-  /// Soft surface accent (chips, highlights).
-  static const Color surfaceAccent = Color(0xFFFFDD9C);
+  // ── Brand aliases ──────────────────────────────────────────────────────
+  static const Color primary = primaryDark;
+  static const Color primaryLight = secondaryDark;
+  static const Color secondary = secondaryDark;
+  static const Color accent = warmGray;
+  static const Color surfaceAccent = cream;
 
   // ── Surfaces ───────────────────────────────────────────────────────────
-  /// App background warm cream.
-  static const Color background = Color(0xFFFFF9F3);
+  /// Warm cream app background.
+  static const Color background = cream;
 
-  /// Card / elevated surface.
-  static const Color surface = Color(0xFFFFFFFF);
+  /// Card / elevated surface — slightly lifted cream for hierarchy.
+  static const Color surface = Color(0xFFEFE6D6);
 
-  /// Muted warm panel / tonal button fill.
-  static const Color surfaceMuted = Color(0xFFFFF0E0);
+  /// Muted panel / tonal fills.
+  static const Color surfaceMuted = Color(0xFFE5D9C4);
 
-  /// Dividers and borders.
-  static const Color border = Color(0xFFF1E6D8);
+  /// Borders & dividers (warm gray).
+  static const Color border = warmGray;
+  static const Color divider = warmGray;
 
-  /// Alias for divider token.
-  static const Color divider = border;
-
-  /// Default chip fill.
-  static const Color chip = surfaceAccent;
+  /// Chip / selected / highlight fill.
+  static const Color chip = cream;
 
   // ── Text ───────────────────────────────────────────────────────────────
-  static const Color onPrimary = Color(0xFFFFFFFF);
-  static const Color onBackground = Color(0xFF1F1F1F);
-  static const Color primaryText = onBackground;
-  static const Color secondaryText = Color(0xFF666666);
-  static const Color muted = secondaryText;
+  /// Text/icons on dark primary surfaces.
+  static const Color onPrimary = cream;
+  static const Color onBackground = primaryDark;
+  static const Color primaryText = primaryDark;
+  static const Color secondaryText = warmGray;
+  static const Color muted = warmGray;
 
-  // ── Semantic ───────────────────────────────────────────────────────────
-  static const Color error = Color(0xFFC62828);
-  static const Color warning = Color(0xFFF9B637);
-  static const Color success = Color(0xFF2E7D32);
+  // ── Semantic (palette-derived for contrast) ────────────────────────────
+  static const Color error = primaryDark;
+  static const Color warning = warmGray;
+  static const Color success = secondaryDark;
 
-  // Soft semantic fills (chips / badges) — paired with dark foregrounds for AA.
-  static const Color errorSoft = Color(0xFFFFEBEE);
-  static const Color warningSoft = Color(0xFFFFF3D6);
-  static const Color successSoft = Color(0xFFE8F5E9);
-  static const Color infoSoft = Color(0xFFFFE8D6);
-  static const Color info = Color(0xFFB45309);
+  static const Color errorSoft = Color(0xFFE8DFD0);
+  static const Color warningSoft = Color(0xFFE5D9C4);
+  static const Color successSoft = Color(0xFFE8DFD0);
+  static const Color infoSoft = Color(0xFFE5D9C4);
+  static const Color info = secondaryDark;
 
   // ── Inventory stock status ─────────────────────────────────────────────
-  /// Healthy / in stock — green.
-  static const Color stockHealthy = success;
-  static const Color stockHealthyFg = Color(0xFF1B5E20);
+  static const Color stockHealthy = secondaryDark;
+  static const Color stockHealthyFg = secondaryDark;
   static const Color stockHealthyBg = successSoft;
-  static const Color stockHealthyBorder = Color(0xFF2E7D32);
+  static const Color stockHealthyBorder = secondaryDark;
 
-  /// Low stock — gold.
-  static const Color stockLow = accent;
-  static const Color stockLowFg = Color(0xFF7A5200);
-  static const Color stockLowBg = Color(0xFFFFF0C2);
-  static const Color stockLowBorder = Color(0xFFD4A017);
+  static const Color stockLow = warmGray;
+  static const Color stockLowFg = Color(0xFF6B6358);
+  static const Color stockLowBg = warningSoft;
+  static const Color stockLowBorder = warmGray;
 
-  /// Out of stock — red.
-  static const Color stockOut = error;
-  static const Color stockOutFg = Color(0xFFB71C1C);
+  static const Color stockOut = primaryDark;
+  static const Color stockOutFg = primaryDark;
   static const Color stockOutBg = errorSoft;
-  static const Color stockOutBorder = Color(0xFFC62828);
+  static const Color stockOutBorder = primaryDark;
 
   // ── Locker / status extras ─────────────────────────────────────────────
   static const Color offlineBg = warningSoft;
-  static const Color offlineFg = Color(0xFF7A5A00);
+  static const Color offlineFg = Color(0xFF6B6358);
   static const Color cancelBg = errorSoft;
   static const Color paidBg = infoSoft;
   static const Color paidFg = info;
 
   // ── Gradients ──────────────────────────────────────────────────────────
-  /// Admin statistic cards & brand CTAs: primary → secondary.
-  static const List<Color> brandGradient = [primary, secondary];
+  static const List<Color> brandGradient = [primaryDark, secondaryDark];
 
   static const LinearGradient brandLinearGradient = LinearGradient(
     begin: Alignment.topLeft,
@@ -100,7 +94,7 @@ class AppColors {
   static const LinearGradient splashGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [primary, primaryLight, accent],
+    colors: [primaryDark, secondaryDark, warmGray],
   );
 
   static const LinearGradient lockerCardGradient = LinearGradient(
@@ -110,9 +104,15 @@ class AppColors {
   );
 
   // ── Table / admin chrome ───────────────────────────────────────────────
-  static const Color tableHeader = primary;
-  static const Color tableRowAlt = Color(0xFFFFF5EB);
-  static const Color tableRowHover = Color(0xFFFFE8D1);
-  static const Color tableBorder = Color(0xFFE8D5C0);
-  static const Color shadow = Color(0x1A1F1F1F);
+  static const Color tableHeader = primaryDark;
+  static const Color tableRowAlt = surfaceMuted;
+  static const Color tableRowHover = Color(0xFFD9CDB8);
+  static const Color tableBorder = warmGray;
+  static const Color shadow = Color(0x33222831);
+
+  // ── Dark mode surfaces ─────────────────────────────────────────────────
+  static const Color darkBackground = primaryDark;
+  static const Color darkSurface = secondaryDark;
+  static const Color darkOnSurface = cream;
+  static const Color darkMuted = warmGray;
 }

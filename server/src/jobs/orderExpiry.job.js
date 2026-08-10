@@ -6,14 +6,16 @@ const logger = require('../config/logger');
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 
 /**
- * Periodically releases stock for unpaid expired orders.
+ * Periodically expires unpaid reservations and paid collection windows.
  */
 function startOrderExpiryJob(intervalMs = DEFAULT_INTERVAL_MS) {
   const tick = async () => {
     try {
       const count = await orderService.expireDueOrders();
       if (count > 0) {
-        logger.info(`Expired ${count} unpaid order(s) and released reserved stock`);
+        logger.info(
+          `Expired ${count} order(s) (unpaid reservation and/or collection deadline)`,
+        );
       }
     } catch (error) {
       logger.error('Order expiry job failed', { message: error.message });

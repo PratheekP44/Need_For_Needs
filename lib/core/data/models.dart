@@ -181,6 +181,16 @@ class OrderSummary {
     this.collectionToken = '',
     this.itemImages = const [],
     this.itemNames = const [],
+    this.mongoId = '',
+    this.rawStatus = '',
+    this.customerName = '',
+    this.customerEmail = '',
+    this.terminalNumber,
+    this.paidAt,
+    this.collectionDeadline,
+    this.collectedAt,
+    this.expiredAt,
+    this.cancelledAt,
   });
 
   final String id;
@@ -195,6 +205,34 @@ class OrderSummary {
   final String collectionToken;
   final List<String> itemImages;
   final List<String> itemNames;
+  /// Mongo ObjectId when available (for admin cancel/delete APIs).
+  final String mongoId;
+  /// Backend enum status (e.g. READY_FOR_COLLECTION).
+  final String rawStatus;
+  final String customerName;
+  final String customerEmail;
+  final int? terminalNumber;
+  final DateTime? paidAt;
+  final DateTime? collectionDeadline;
+  final DateTime? collectedAt;
+  final DateTime? expiredAt;
+  final DateTime? cancelledAt;
+
+  bool get isPendingCollection =>
+      rawStatus == 'READY_FOR_COLLECTION' || rawStatus == 'PAYMENT_SUCCESS';
+
+  bool get isExpired => rawStatus == 'EXPIRED' || status == 'Expired';
+
+  bool get isCollected => rawStatus == 'COLLECTED' || status == 'Collected';
+
+  bool get isCancelled => rawStatus == 'CANCELLED' || status == 'Cancelled';
+
+  bool get canCollect {
+    if (!isPendingCollection) return false;
+    final deadline = collectionDeadline;
+    if (deadline == null) return true;
+    return DateTime.now().toUtc().isBefore(deadline.toUtc());
+  }
 }
 
 class AppUser {
@@ -267,6 +305,9 @@ class InventoryRow {
     this.boxNumber,
     this.imageUrl = '',
     this.itemId = '',
+    this.isEmpty = false,
+    this.occupancy = '',
+    this.lockerMongoId = '',
   });
 
   final String id;
@@ -279,6 +320,44 @@ class InventoryRow {
   final int? boxNumber;
   final String imageUrl;
   final String itemId;
+  /// True when the physical box has no sellable item.
+  final bool isEmpty;
+  /// Occupied | Empty
+  final String occupancy;
+  final String lockerMongoId;
+
+  /// UI label — never invents a catalog Item named "Empty Box".
+  String get displayName => isEmpty ? 'Empty Box' : name;
+
+  bool get isOccupied => !isEmpty && quantity > 0;
+}
+
+class BoxInventorySummary {
+  const BoxInventorySummary({
+    required this.totalBoxes,
+    required this.occupiedBoxes,
+    required this.emptyBoxes,
+  });
+
+  final int totalBoxes;
+  final int occupiedBoxes;
+  final int emptyBoxes;
+}
+
+class PhysicalLockerInventory {
+  const PhysicalLockerInventory({
+    required this.lockerId,
+    required this.lockerName,
+    required this.lockerMongoId,
+    required this.summary,
+    required this.boxes,
+  });
+
+  final String lockerId;
+  final String lockerName;
+  final String lockerMongoId;
+  final BoxInventorySummary summary;
+  final List<InventoryRow> boxes;
 }
 
 class HomeCatalog {

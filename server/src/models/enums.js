@@ -140,6 +140,7 @@ const ACTIVITY_ACTIONS = Object.freeze([
   'checkout',
   'order_cancel',
   'order_expire',
+  'order_delete',
   'stock_reserve',
   'stock_release',
   'other',

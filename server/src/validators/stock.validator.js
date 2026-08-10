@@ -110,6 +110,12 @@ const listStockValidator = [
   query('sort').optional().isString(),
 ];
 
+const listPhysicalInventoryValidator = [
+  query('locker').optional().isString().trim().notEmpty(),
+  query('occupancy').optional().isIn(['all', 'occupied', 'empty']),
+  query('item').optional().isString().trim().notEmpty(),
+];
+
 module.exports = {
   createStockValidator,
   createStockBatchValidator,
@@ -118,4 +124,5 @@ module.exports = {
   moveStockValidator,
   stockIdParamValidator,
   listStockValidator,
+  listPhysicalInventoryValidator,
 };

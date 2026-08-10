@@ -641,6 +641,134 @@ class StockService {
     };
   }
 
+  /**
+   * Phase 24 — physical box inventory for Admin.
+   * Returns one row per box (including empty). Never aggregates item quantities.
+   */
+  async listPhysicalInventory(query = {}) {
+    let locker = null;
+    if (query.locker) {
+      locker = await lockerRepository.findByIdOrLockerId(query.locker);
+      if (!locker) {
+        throw new AppError('Locker not found', 404);
+      }
+    } else {
+      // Prefer Campus Gate when present; otherwise first locker by name.
+      const listed = await lockerRepository.list({
+        filter: {},
+        sort: 'lockerName',
+        skip: 0,
+        limit: 50,
+      });
+      const items = listed.items || [];
+      locker =
+        items.find(
+          (l) =>
+            String(l.lockerId || '').toUpperCase() === 'LCK-DEMO-06742' ||
+            /campus\s*gate/i.test(String(l.lockerName || '')),
+        ) || items[0] || null;
+      if (!locker) {
+        return {
+          locker: null,
+          summary: { totalBoxes: 0, occupiedBoxes: 0, emptyBoxes: 0 },
+          boxes: [],
+        };
+      }
+    }
+
+    const boxes = await boxRepository.findByLocker(locker._id);
+    const stocks = await stockRepository.findByLocker(locker._id);
+    const stockByBoxId = new Map();
+    for (const stock of stocks) {
+      const boxKey = String(stock.box?._id || stock.box || '');
+      if (!boxKey) continue;
+      // One stock per box — keep first if duplicates somehow exist.
+      if (!stockByBoxId.has(boxKey)) {
+        stockByBoxId.set(boxKey, stock);
+      }
+    }
+
+    const occupancyFilter = String(query.occupancy || 'all').toLowerCase();
+    const itemFilter = query.item ? String(query.item) : null;
+
+    const rows = [];
+
+    for (const box of boxes) {
+      const stock = stockByBoxId.get(String(box._id));
+      const qty = stock ? Number(stock.currentQuantity) || 0 : 0;
+      const occupied = Boolean(stock && stock.item && qty > 0);
+
+      if (occupancyFilter === 'occupied' && !occupied) continue;
+      if (occupancyFilter === 'empty' && occupied) continue;
+
+      if (itemFilter) {
+        const itemId = stock?.item?._id || stock?.item;
+        const itemCode = stock?.item?.itemId;
+        const match =
+          String(itemId) === itemFilter ||
+          String(itemCode || '').toUpperCase() === itemFilter.toUpperCase();
+        if (!match) continue;
+      }
+
+      const itemDoc =
+        stock?.item && typeof stock.item === 'object' ? stock.item : null;
+
+      rows.push({
+        boxId: box._id,
+        boxCode: box.boxId,
+        boxNumber: box.boxNumber,
+        boxStatus: box.status,
+        isEmpty: !occupied,
+        occupancy: occupied ? 'Occupied' : 'Empty',
+        quantity: occupied ? 1 : 0,
+        stockId: stock?._id || null,
+        stockCode: stock?.stockId || '',
+        stockStatus: stock?.status || null,
+        item: occupied && itemDoc
+          ? formatItem(itemDoc)
+          : occupied && stock?.item
+            ? stock.item
+            : null,
+        itemId: occupied ? itemDoc?._id || stock?.item || null : null,
+        itemName: occupied
+          ? itemDoc?.name || 'Item'
+          : null,
+        imageUrl: occupied ? itemDoc?.imageUrl || '' : '',
+        price: occupied ? Number(itemDoc?.sellingPrice) || 0 : 0,
+        locker: {
+          id: locker._id,
+          lockerId: locker.lockerId,
+          lockerName: locker.lockerName,
+          status: locker.status,
+          terminalNumber: locker.terminalNumber,
+        },
+      });
+    }
+
+    // Summary is always for the full locker (not the filtered subset).
+    const totalBoxes = boxes.length;
+    const fullOccupied = [...stockByBoxId.values()].filter(
+      (s) => s.item && Number(s.currentQuantity) > 0,
+    ).length;
+
+    return {
+      locker: {
+        id: locker._id,
+        lockerId: locker.lockerId,
+        lockerName: locker.lockerName,
+        status: locker.status,
+        terminalNumber: locker.terminalNumber,
+        totalBoxes: locker.totalBoxes,
+      },
+      summary: {
+        totalBoxes,
+        occupiedBoxes: fullOccupied,
+        emptyBoxes: totalBoxes - fullOccupied,
+      },
+      boxes: rows,
+    };
+  }
+
   async getCatalogProductByItemId(itemId) {
     const item = await itemRepository.findByIdOrItemId(itemId);
     if (!item || !item.isActive) {

@@ -31,10 +31,24 @@ const getOrder = asyncHandler(async (req, res) => {
 });
 
 const cancelOrder = asyncHandler(async (req, res) => {
-  const order = await orderService.cancelOrder(req.auth, req.params.id);
+  const order = await orderService.cancelOrder(req.auth, req.params.id, {
+    reason: req.body?.reason,
+  });
   res.status(200).json({
     success: true,
-    message: 'Order cancelled successfully',
+    message:
+      order.paymentStatus === 'SUCCESS'
+        ? 'Order cancelled. Payment was successful — refund must be handled separately.'
+        : 'Order cancelled successfully',
+    data: { order },
+  });
+});
+
+const deleteOrder = asyncHandler(async (req, res) => {
+  const order = await orderService.deleteOrder(req.auth, req.params.id);
+  res.status(200).json({
+    success: true,
+    message: 'Order deleted successfully (payment/transaction records preserved)',
     data: { order },
   });
 });
@@ -76,6 +90,7 @@ module.exports = {
   listOrders,
   getOrder,
   cancelOrder,
+  deleteOrder,
   issueUnlockPayload,
   getUnlockInfo,
   collectComplete,

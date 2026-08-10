@@ -120,6 +120,14 @@ class StockRepository {
     return Stock.countDocuments({ item: itemId }).exec();
   }
 
+  async findByLocker(lockerId) {
+    return Stock.find({ locker: lockerId })
+      .populate('item')
+      .populate('locker', 'lockerId lockerName status')
+      .populate('box', 'boxId boxNumber status isEmpty doorState')
+      .exec();
+  }
+
   async findByIdRaw(id) {
     return Stock.findById(id).populate('item').exec();
   }

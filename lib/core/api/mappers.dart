@@ -122,20 +122,82 @@ InventoryRow mapStockToInventory(Map<String, dynamic> stock) {
   final locker = stock['locker'] is Map ? asMap(stock['locker']) : <String, dynamic>{};
   final box = stock['box'] is Map ? asMap(stock['box']) : <String, dynamic>{};
   final boxNumberRaw = stock['boxNumber'] ?? box['boxNumber'];
+  final qty = asInt(stock['quantity'], asInt(stock['currentQuantity']));
+  final isEmpty = stock['isEmpty'] == true || qty <= 0;
   return InventoryRow(
-    id: asString(stock['id']) ?? asString(stock['stockId']) ?? '',
-    stockId: asString(stock['stockId']) ?? '',
-    name: asString(item['name']) ?? 'Item',
-    price: asDouble(item['sellingPrice']),
-    quantity: asInt(stock['quantity'], asInt(stock['currentQuantity'])),
+    id: asString(stock['stockId']) ??
+        asString(stock['id']) ??
+        asString(stock['boxId']) ??
+        '',
+    stockId: asString(stock['stockId']) ?? asString(stock['stockCode']) ?? '',
+    name: asString(item['name']) ??
+        asString(stock['itemName']) ??
+        (isEmpty ? 'Empty Box' : 'Item'),
+    price: asDouble(item['sellingPrice'], asDouble(stock['price'])),
+    quantity: isEmpty ? 0 : (qty > 0 ? 1 : 0),
     assignedLocker: asString(stock['lockerName']) ??
         asString(locker['lockerName']) ??
         asString(locker['lockerId']) ??
         '—',
     boxId: asString(stock['boxId']) ?? asString(box['id']) ?? '',
     boxNumber: boxNumberRaw is num ? boxNumberRaw.toInt() : int.tryParse('$boxNumberRaw'),
-    imageUrl: asString(item['imageUrl']) ?? '',
-    itemId: asString(item['id']) ?? asString(item['itemId']) ?? '',
+    imageUrl: asString(item['imageUrl']) ?? asString(stock['imageUrl']) ?? '',
+    itemId: asString(item['id']) ?? asString(item['itemId']) ?? asString(stock['itemId']) ?? '',
+    isEmpty: isEmpty,
+    occupancy: asString(stock['occupancy']) ?? (isEmpty ? 'Empty' : 'Occupied'),
+    lockerMongoId: asString(locker['id']) ?? asString(stock['lockerId']) ?? '',
+  );
+}
+
+InventoryRow mapPhysicalBoxRow(Map<String, dynamic> json) {
+  final locker = json['locker'] is Map ? asMap(json['locker']) : <String, dynamic>{};
+  final item = json['item'] is Map ? asMap(json['item']) : <String, dynamic>{};
+  final isEmpty = json['isEmpty'] == true ||
+      (asString(json['occupancy'])?.toLowerCase() == 'empty');
+  final boxNumberRaw = json['boxNumber'];
+  final stockId = asString(json['stockId']) ?? '';
+  final boxId = asString(json['boxId']) ?? '';
+  return InventoryRow(
+    id: stockId.isNotEmpty ? stockId : 'box:$boxId',
+    stockId: asString(json['stockCode']) ?? stockId,
+    name: isEmpty
+        ? 'Empty Box'
+        : (asString(json['itemName']) ?? asString(item['name']) ?? 'Item'),
+    price: asDouble(json['price'], asDouble(item['sellingPrice'])),
+    quantity: isEmpty ? 0 : 1,
+    assignedLocker: asString(locker['lockerName']) ??
+        asString(locker['lockerId']) ??
+        '—',
+    boxId: boxId,
+    boxNumber:
+        boxNumberRaw is num ? boxNumberRaw.toInt() : int.tryParse('$boxNumberRaw'),
+    imageUrl: asString(json['imageUrl']) ?? asString(item['imageUrl']) ?? '',
+    itemId: asString(json['itemId']) ??
+        asString(item['id']) ??
+        asString(item['itemId']) ??
+        '',
+    isEmpty: isEmpty,
+    occupancy: asString(json['occupancy']) ?? (isEmpty ? 'Empty' : 'Occupied'),
+    lockerMongoId: asString(locker['id']) ?? '',
+  );
+}
+
+PhysicalLockerInventory mapPhysicalLockerInventory(Map<String, dynamic> data) {
+  final locker = data['locker'] is Map ? asMap(data['locker']) : <String, dynamic>{};
+  final summary = data['summary'] is Map
+      ? asMap(data['summary'])
+      : <String, dynamic>{};
+  final boxes = asList(data['boxes']).map((e) => mapPhysicalBoxRow(asMap(e))).toList();
+  return PhysicalLockerInventory(
+    lockerId: asString(locker['lockerId']) ?? '',
+    lockerName: asString(locker['lockerName']) ?? 'Locker',
+    lockerMongoId: asString(locker['id']) ?? '',
+    summary: BoxInventorySummary(
+      totalBoxes: asInt(summary['totalBoxes'], boxes.length),
+      occupiedBoxes: asInt(summary['occupiedBoxes']),
+      emptyBoxes: asInt(summary['emptyBoxes']),
+    ),
+    boxes: boxes,
   );
 }
 
@@ -169,6 +231,7 @@ CartLine mapCartLine(Map<String, dynamic> line) {
 
 OrderSummary mapOrder(Map<String, dynamic> json) {
   final locker = json['locker'] is Map ? asMap(json['locker']) : <String, dynamic>{};
+  final user = json['user'] is Map ? asMap(json['user']) : <String, dynamic>{};
   final items = asList(json['items']);
   final boxes = <String>{};
   final images = <String>[];
@@ -187,11 +250,14 @@ OrderSummary mapOrder(Map<String, dynamic> json) {
     if (name != null && name.isNotEmpty) names.add(name);
   }
   final created = asString(json['createdAt']) ?? '';
+  final rawStatus = (asString(json['status']) ?? '').toUpperCase();
   return OrderSummary(
     id: asString(json['orderNumber']) ?? asString(json['id']) ?? '',
+    mongoId: asString(json['id']) ?? '',
     lockerName: asString(locker['lockerName']) ?? 'Locker',
     lockerNumber: asString(locker['lockerId']) ?? '—',
-    status: _orderStatusLabel(asString(json['status'])),
+    status: _orderStatusLabel(rawStatus),
+    rawStatus: rawStatus,
     total: asDouble(json['grandTotal']),
     placedAt: created.length >= 16 ? created.substring(0, 16).replaceFirst('T', ' ') : created,
     boxes: boxes.toList(),
@@ -200,7 +266,26 @@ OrderSummary mapOrder(Map<String, dynamic> json) {
     collectionToken: asString(json['collectionToken']) ?? '',
     itemImages: images,
     itemNames: names,
+    customerName: asString(user['name']) ?? '',
+    customerEmail: asString(user['email']) ?? '',
+    terminalNumber: locker['terminalNumber'] == null
+        ? null
+        : asInt(locker['terminalNumber']),
+    paidAt: _parseUtcDate(json['paidAt']),
+    collectionDeadline: _parseUtcDate(json['collectionDeadline']),
+    collectedAt: _parseUtcDate(json['collectedAt']),
+    expiredAt: _parseUtcDate(json['expiredAt']),
+    cancelledAt: _parseUtcDate(json['cancelledAt']),
   );
+}
+
+DateTime? _parseUtcDate(dynamic value) {
+  if (value == null) return null;
+  if (value is DateTime) return value.toUtc();
+  final text = value.toString().trim();
+  if (text.isEmpty) return null;
+  final parsed = DateTime.tryParse(text);
+  return parsed?.toUtc();
 }
 
 ProductCategory mapCategory(Map<String, dynamic> json) {

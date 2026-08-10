@@ -72,11 +72,11 @@ class UnlockPayloadService {
   }
 
   async issue(auth, orderId) {
-    const order = await orderRepository.findByIdOrOrderNumberForUnlock(orderId);
+    let order = await orderRepository.findByIdOrOrderNumberForUnlock(orderId);
     if (!order) {
       throw new AppError('Order not found', 404);
     }
-    if (auth.role !== 'admin' && String(order.user) !== String(auth.sub)) {
+    if (auth.role !== 'admin' && String(order.user?._id || order.user) !== String(auth.sub)) {
       throw new AppError('Forbidden', 403);
     }
 
@@ -86,6 +86,16 @@ class UnlockPayloadService {
         400,
       );
     }
+
+    // Phase 23 — expire + deadline gate before issuing Unlock JWT (legacy path).
+    const {
+      expireOrderIfNeeded,
+      assertCollectible,
+    } = require('./orderExpiration.service');
+    order = await expireOrderIfNeeded(order, {
+      persist: (oid, data) => orderRepository.updateById(oid, data),
+    });
+    assertCollectible(order);
 
     const locker = resolveLockerDoc(order);
     const box = resolveBoxDoc(order);

@@ -9,24 +9,24 @@ class OrderRepository {
     return Order.create(data);
   }
 
-  async findById(id) {
-    return Order.findById(id)
-      .populate('locker', 'lockerId lockerName status')
+  _basePopulate(query) {
+    return query
+      .populate('user', 'name email phone')
+      .populate('locker', 'lockerId lockerName status terminalNumber')
       .populate('items.item')
       .populate('items.stock')
       .populate('items.box', 'boxId boxNumber status')
-      .populate('items.locker', 'lockerId lockerName status')
-      .exec();
+      .populate('items.locker', 'lockerId lockerName status');
+  }
+
+  async findById(id) {
+    return this._basePopulate(Order.findById(id)).exec();
   }
 
   async findByOrderNumber(orderNumber) {
-    return Order.findOne({ orderNumber: String(orderNumber).toUpperCase() })
-      .populate('locker', 'lockerId lockerName status')
-      .populate('items.item')
-      .populate('items.stock')
-      .populate('items.box', 'boxId boxNumber status')
-      .populate('items.locker', 'lockerId lockerName status')
-      .exec();
+    return this._basePopulate(
+      Order.findOne({ orderNumber: String(orderNumber).toUpperCase() }),
+    ).exec();
   }
 
   async findByIdOrOrderNumber(idOrNumber) {
@@ -67,9 +67,14 @@ class OrderRepository {
   }
 
   async list({ filter, sort, skip, limit }) {
+    const scoped = {
+      ...filter,
+      deletedAt: filter.deletedAt !== undefined ? filter.deletedAt : null,
+    };
     const [items, total] = await Promise.all([
-      Order.find(filter)
-        .populate('locker', 'lockerId lockerName status')
+      Order.find(scoped)
+        .populate('user', 'name email phone')
+        .populate('locker', 'lockerId lockerName status terminalNumber')
         .populate('items.item')
         .populate('items.stock', 'stockId currentQuantity status')
         .populate('items.box', 'boxId boxNumber status')
@@ -77,22 +82,18 @@ class OrderRepository {
         .skip(skip)
         .limit(limit)
         .exec(),
-      Order.countDocuments(filter).exec(),
+      Order.countDocuments(scoped).exec(),
     ]);
     return { items, total };
   }
 
   async updateById(id, data) {
-    return Order.findByIdAndUpdate(id, data, {
-      new: true,
-      runValidators: true,
-    })
-      .populate('locker', 'lockerId lockerName status')
-      .populate('items.item')
-      .populate('items.stock')
-      .populate('items.box', 'boxId boxNumber status')
-      .populate('items.locker', 'lockerId lockerName status')
-      .exec();
+    return this._basePopulate(
+      Order.findByIdAndUpdate(id, data, {
+        new: true,
+        runValidators: true,
+      }),
+    ).exec();
   }
 
   async findExpiredPending(now = new Date()) {
@@ -100,6 +101,18 @@ class OrderRepository {
     return Order.find({
       status: { $in: ['CREATED', 'WAITING_PAYMENT'] },
       expiresAt: { $ne: null, $lte: now },
+      deletedAt: null,
+    }).exec();
+  }
+
+  /**
+   * Paid orders past collectionDeadline still pending collection.
+   */
+  async findExpiredCollectionPending(now = new Date()) {
+    return Order.find({
+      status: { $in: ['READY_FOR_COLLECTION', 'PAYMENT_SUCCESS'] },
+      collectionDeadline: { $ne: null, $lte: now },
+      deletedAt: null,
     }).exec();
   }
 

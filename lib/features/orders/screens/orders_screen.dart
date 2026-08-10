@@ -44,7 +44,9 @@ class OrdersScreen extends ConsumerWidget {
                           const SizedBox(height: 12),
                       itemBuilder: (context, index) {
                         final order = state.orders[index];
-                        final ready = order.status == 'Ready to collect';
+                        final ready = order.status == 'Ready to collect' &&
+                            order.canCollect;
+                        final expired = order.isExpired;
                         final chip = _statusStyle(order.status);
                         return SoftPanel(
                           child: Column(
@@ -89,6 +91,12 @@ class OrdersScreen extends ConsumerWidget {
                                   style: AppTextStyles.caption,
                                 ),
                               Text(order.placedAt, style: AppTextStyles.caption),
+                              if (order.isPendingCollection &&
+                                  order.collectionDeadline != null)
+                                Text(
+                                  'Collect by ${order.collectionDeadline!.toLocal()}',
+                                  style: AppTextStyles.caption,
+                                ),
                               if (order.paymentStatus.isNotEmpty)
                                 Text(
                                   'Payment: ${order.paymentStatus}',
@@ -150,6 +158,14 @@ class OrdersScreen extends ConsumerWidget {
                                   label: 'Collect Item',
                                   onPressed: () =>
                                       context.push('/collect-item'),
+                                ),
+                              ] else if (expired &&
+                                  order.status == 'Expired') ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Collection expired',
+                                  style: AppTextStyles.caption
+                                      .copyWith(color: AppColors.error),
                                 ),
                               ],
                             ],

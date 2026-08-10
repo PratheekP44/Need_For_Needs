@@ -33,7 +33,7 @@ class ImagePlaceholder extends StatelessWidget {
         ),
       ),
       child: Center(
-        child: Icon(icon, size: size, color: AppColors.primaryLight),
+        child: Icon(icon, size: size, color: AppColors.warmGray),
       ),
     );
   }

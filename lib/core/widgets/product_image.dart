@@ -51,7 +51,8 @@ class ProductImage extends ConsumerWidget {
         height: height,
         width: width,
         fit: fit,
-        memCacheWidth: width != null && width!.isFinite ? (width! * 2).round() : 600,
+        memCacheWidth:
+            width != null && width!.isFinite ? (width! * 2).round() : 600,
         fadeInDuration: const Duration(milliseconds: 120),
         placeholder: (_, _) => Container(
           height: height,
@@ -65,13 +66,38 @@ class ProductImage extends ConsumerWidget {
             ),
           ),
         ),
-        errorWidget: (_, _, _) => ImagePlaceholder(
-          height: height,
-          width: width,
-          borderRadius: borderRadius,
-          icon: icon,
-          size: iconSize,
-        ),
+        errorWidget: (_, _, _) {
+          final compact = (height ?? 0) > 0 && (height ?? 0) < 72;
+          return Container(
+            height: height,
+            width: width,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceMuted,
+              borderRadius: BorderRadius.circular(borderRadius),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: compact ? iconSize * 0.7 : iconSize,
+                  color: AppColors.warmGray,
+                ),
+                if (!compact) ...[
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Image unavailable',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.warmGray,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }

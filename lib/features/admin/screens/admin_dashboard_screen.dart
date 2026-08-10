@@ -11,6 +11,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/money_format.dart';
 import '../../../core/widgets/page_scaffold.dart';
 import '../../../core/widgets/product_image.dart';
+import '../../../core/widgets/item_image_url_field.dart';
 import '../../../core/widgets/product_image_picker.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
@@ -463,29 +464,93 @@ class AdminInventoryScreen extends ConsumerStatefulWidget {
 }
 
 class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
+  static const _occupancyFilters = <(String, String)>[
+    ('All Boxes', 'all'),
+    ('Occupied', 'occupied'),
+    ('Empty', 'empty'),
+  ];
+
+  String _occupancy = 'all';
+  String? _lockerMongoId;
+  List<Locker> _lockers = const [];
+  PhysicalLockerInventory? _inventory;
+  bool _loading = true;
+  String? _error;
   String? _deletingId;
 
-  Future<void> _confirmDelete(InventoryRow row) async {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(_bootstrap);
+  }
+
+  Future<void> _bootstrap() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final lockers = await ref.read(lockerRepositoryProvider).list();
+      if (!mounted) return;
+      String? preferred = _lockerMongoId;
+      if (preferred == null || preferred.isEmpty) {
+        final campus = lockers.where(
+          (l) =>
+              l.lockerCode.toUpperCase() == 'LCK-DEMO-06742' ||
+              l.name.toLowerCase().contains('campus gate'),
+        );
+        preferred = campus.isNotEmpty
+            ? campus.first.id
+            : (lockers.isNotEmpty ? lockers.first.id : null);
+      }
+      final inventory = await ref
+          .read(catalogRepositoryProvider)
+          .listPhysicalInventory(
+            lockerId: preferred,
+            occupancy: _occupancy,
+          );
+      if (!mounted) return;
+      setState(() {
+        _lockers = lockers;
+        _lockerMongoId = preferred;
+        _inventory = inventory;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = userFacingError(e);
+      });
+    }
+  }
+
+  Future<void> _reload() => _bootstrap();
+
+  Future<void> _confirmRemove(InventoryRow row) async {
+    final stockKey = row.id.startsWith('box:') ? '' : row.id;
+    if (row.isEmpty || stockKey.isEmpty) {
+      showAppSnackBar(context, 'Box is already empty');
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete stock record?'),
+        title: const Text('Remove item from box?'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(row.name, style: AppTextStyles.title),
+            Text(row.displayName, style: AppTextStyles.title),
             const SizedBox(height: 8),
             Text('Locker: ${row.assignedLocker}'),
             Text(
-              row.boxNumber != null
-                  ? 'Box: #${row.boxNumber}'
-                  : 'Box: —',
+              row.boxNumber != null ? 'Box: #${row.boxNumber}' : 'Box: —',
             ),
             const SizedBox(height: 12),
             Text(
-              'This removes the physical stock record and marks the box as EMPTY. '
-              'This cannot be undone.',
+              'The physical box becomes EMPTY. The box itself is not deleted.',
               style: AppTextStyles.caption.copyWith(color: AppColors.error),
             ),
           ],
@@ -498,7 +563,7 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
+            child: const Text('Remove'),
           ),
         ],
       ),
@@ -508,12 +573,13 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
 
     setState(() => _deletingId = row.id);
     try {
-      await ref.read(catalogRepositoryProvider).deleteStock(row.id);
+      await ref.read(catalogRepositoryProvider).deleteStock(stockKey);
       await ref.read(adminViewModelProvider.notifier).refresh();
+      await _reload();
       if (!mounted) return;
       showAppSnackBar(
         context,
-        'Deleted ${row.name} from box'
+        'Removed ${row.displayName} from box'
         '${row.boxNumber != null ? ' #${row.boxNumber}' : ''}. Box is now empty.',
       );
     } catch (e) {
@@ -531,7 +597,8 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(adminViewModelProvider);
+    final inv = _inventory;
+    final summary = inv?.summary;
 
     return PageScaffold(
       title: 'Inventory',
@@ -544,10 +611,13 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
             backgroundColor: AppColors.primaryLight,
             foregroundColor: AppColors.onPrimary,
             elevation: 3,
-            onPressed: () => context.push('/admin/inventory/assign'),
+            onPressed: () async {
+              await context.push('/admin/inventory/assign');
+              if (mounted) _reload();
+            },
             icon: const Icon(Icons.inventory_2_outlined),
             label: const Text(
-              'Assign stock',
+              'Assign to box',
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
@@ -566,317 +636,240 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
           ),
         ],
       ),
-      body: state.isLoading
+      body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : state.inventory.isEmpty
-              ? Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 28,
-                      vertical: 36,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: AppColors.tableBorder,
-                        width: 1.5,
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: AppColors.shadow,
-                          blurRadius: 10,
-                          offset: Offset(0, 3),
+          : _error != null
+              ? EmptyState(message: _error!, icon: Icons.error_outline)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_lockers.isNotEmpty)
+                      DropdownButtonFormField<String>(
+                        value: _lockerMongoId,
+                        decoration: const InputDecoration(
+                          labelText: 'Locker',
+                          border: OutlineInputBorder(),
                         ),
-                      ],
-                    ),
-                    child: const EmptyState(
-                      message: 'No inventory items yet',
-                      icon: Icons.inventory_2_outlined,
-                    ),
-                  ),
-                )
-              : SingleChildScrollView(
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(12, 14, 12, 18),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: AppColors.tableBorder,
-                        width: 1.5,
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: AppColors.shadow,
-                          blurRadius: 12,
-                          offset: Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minWidth: MediaQuery.sizeOf(context).width - 64,
-                        ),
-                        child: DataTable(
-                          headingRowHeight: 52,
-                          dataRowMinHeight: 64,
-                          dataRowMaxHeight: 76,
-                          horizontalMargin: 16,
-                          columnSpacing: 22,
-                          dividerThickness: 1.2,
-                          border: TableBorder(
-                            horizontalInside: BorderSide(
-                              color: AppColors.tableBorder,
-                              width: 1,
-                            ),
-                          ),
-                          headingRowColor: const WidgetStatePropertyAll(
-                            AppColors.tableHeader,
-                          ),
-                          headingTextStyle: AppTextStyles.label.copyWith(
-                            color: AppColors.onPrimary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.2,
-                          ),
-                          dataTextStyle: AppTextStyles.body.copyWith(
-                            color: AppColors.onBackground,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          columns: const [
-                            DataColumn(label: Text('Image')),
-                            DataColumn(label: Text('Item')),
-                            DataColumn(label: Text('Price')),
-                            DataColumn(label: Text('Qty')),
-                            DataColumn(label: Text('Status')),
-                            DataColumn(label: Text('Locker')),
-                            DataColumn(label: Text('Box')),
-                            DataColumn(label: Text('Actions')),
-                          ],
-                          rows: [
-                            for (var i = 0; i < state.inventory.length; i++)
-                              _inventoryDataRow(
-                                state.inventory[i],
-                                index: i,
-                                deleting: _deletingId == state.inventory[i].id,
+                        items: _lockers
+                            .map(
+                              (l) => DropdownMenuItem(
+                                value: l.id,
+                                child: Text(l.name),
                               ),
+                            )
+                            .toList(),
+                        onChanged: (v) {
+                          setState(() => _lockerMongoId = v);
+                          _reload();
+                        },
+                      ),
+                    const SizedBox(height: 12),
+                    if (summary != null)
+                      SoftPanel(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _summaryTile(
+                                'Total Boxes',
+                                '${summary.totalBoxes}',
+                              ),
+                            ),
+                            Expanded(
+                              child: _summaryTile(
+                                'Occupied',
+                                '${summary.occupiedBoxes}',
+                              ),
+                            ),
+                            Expanded(
+                              child: _summaryTile(
+                                'Empty',
+                                '${summary.emptyBoxes}',
+                              ),
+                            ),
                           ],
                         ),
                       ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 40,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _occupancyFilters.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (context, index) {
+                          final (label, value) = _occupancyFilters[index];
+                          return ChoiceChip(
+                            label: Text(label),
+                            selected: _occupancy == value,
+                            onSelected: (_) {
+                              setState(() => _occupancy = value);
+                              _reload();
+                            },
+                          );
+                        },
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    Text(
+                      inv == null
+                          ? 'Physical box contents'
+                          : '${inv.lockerName} — each row is one physical box',
+                      style: AppTextStyles.caption,
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: inv == null || inv.boxes.isEmpty
+                          ? const EmptyState(
+                              message: 'No boxes for this locker',
+                              icon: Icons.inventory_2_outlined,
+                            )
+                          : RefreshIndicator(
+                              onRefresh: _reload,
+                              child: ListView.separated(
+                                itemCount: inv.boxes.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 8),
+                                itemBuilder: (context, index) {
+                                  final row = inv.boxes[index];
+                                  final deleting = _deletingId == row.id;
+                                  return SoftPanel(
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Container(
+                                          width: 48,
+                                          height: 48,
+                                          decoration: BoxDecoration(
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            border: Border.all(
+                                              color: AppColors.tableBorder,
+                                            ),
+                                            color: AppColors.surfaceMuted,
+                                          ),
+                                          clipBehavior: Clip.antiAlias,
+                                          child: row.isEmpty
+                                              ? const Icon(
+                                                  Icons.inbox_outlined,
+                                                  color: AppColors.muted,
+                                                )
+                                              : ProductImage(
+                                                  imageUrl: row.imageUrl,
+                                                  height: 48,
+                                                  width: 48,
+                                                  borderRadius: 9,
+                                                  iconSize: 22,
+                                                ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                row.displayName,
+                                                style: AppTextStyles.body
+                                                    .copyWith(
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                'Qty ${row.quantity} · Box ${row.boxNumber ?? '—'}',
+                                                style: AppTextStyles.caption,
+                                              ),
+                                              const SizedBox(height: 6),
+                                              _OccupancyChip(
+                                                occupied: row.isOccupied,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        if (row.isOccupied)
+                                          IconButton(
+                                            tooltip: 'Remove from box',
+                                            onPressed: deleting
+                                                ? null
+                                                : () => _confirmRemove(row),
+                                            icon: deleting
+                                                ? const SizedBox(
+                                                    width: 20,
+                                                    height: 20,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                                  )
+                                                : const Icon(
+                                                    Icons.delete_outline_rounded,
+                                                    color: AppColors.error,
+                                                  ),
+                                          )
+                                        else
+                                          IconButton(
+                                            tooltip: 'Assign item',
+                                            onPressed: () async {
+                                              await context.push(
+                                                '/admin/inventory/assign',
+                                              );
+                                              if (mounted) _reload();
+                                            },
+                                            icon: const Icon(
+                                              Icons.add_box_outlined,
+                                              color: AppColors.primary,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                    ),
+                  ],
                 ),
     );
   }
 
-  DataRow _inventoryDataRow(
-    InventoryRow row, {
-    required int index,
-    required bool deleting,
-  }) {
-    final status = _InventoryStockStatus.fromQuantity(row.quantity);
-    final isEven = index.isEven;
-
-    return DataRow(
-      color: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.hovered) ||
-            states.contains(WidgetState.pressed)) {
-          return AppColors.tableRowHover;
-        }
-        // Alternating rows for scanability — white vs warm tint.
-        return isEven ? AppColors.surface : AppColors.tableRowAlt;
-      }),
-      cells: [
-        DataCell(
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.tableBorder),
-              color: AppColors.surfaceMuted,
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: ProductImage(
-              imageUrl: row.imageUrl,
-              height: 48,
-              width: 48,
-              borderRadius: 9,
-              iconSize: 22,
-            ),
-          ),
-        ),
-        DataCell(
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 180),
-            child: Text(
-              row.name,
-              style: AppTextStyles.body.copyWith(
-                color: AppColors.onBackground,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-        DataCell(
-          Text(
-            MoneyFormat.format(row.price),
-            style: AppTextStyles.body.copyWith(
-              color: AppColors.primary,
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
-            ),
-          ),
-        ),
-        DataCell(
-          Text(
-            '${row.quantity}',
-            style: AppTextStyles.title.copyWith(
-              color: status.quantityColor,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-        DataCell(_InventoryStatusChip(status: status)),
-        DataCell(
-          Text(
-            row.assignedLocker,
-            style: AppTextStyles.body.copyWith(
-              color: AppColors.primaryText,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        DataCell(
-          Text(
-            row.boxNumber != null ? '#${row.boxNumber}' : '—',
-            style: AppTextStyles.body.copyWith(
-              color: AppColors.onBackground,
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
-            ),
-          ),
-        ),
-        DataCell(
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                tooltip: 'Edit',
-                style: IconButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                  backgroundColor: AppColors.surfaceMuted,
-                  side: const BorderSide(color: AppColors.tableBorder),
-                ),
-                onPressed: deleting
-                    ? null
-                    : () {
-                        final target =
-                            row.itemId.isNotEmpty ? row.itemId : row.id;
-                        context.push('/admin/inventory/edit/$target');
-                      },
-                icon: const Icon(Icons.edit_outlined),
-              ),
-              const SizedBox(width: 6),
-              IconButton(
-                tooltip: 'Delete stock',
-                style: IconButton.styleFrom(
-                  foregroundColor: AppColors.error,
-                  backgroundColor: AppColors.errorSoft,
-                  side: BorderSide(
-                    color: AppColors.error.withValues(alpha: 0.45),
-                  ),
-                ),
-                onPressed: deleting ? null : () => _confirmDelete(row),
-                icon: deleting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.delete_outline_rounded),
-              ),
-            ],
-          ),
-        ),
+  Widget _summaryTile(String label, String value) {
+    return Column(
+      children: [
+        Text(value, style: AppTextStyles.title.copyWith(fontSize: 20)),
+        const SizedBox(height: 4),
+        Text(label, style: AppTextStyles.caption),
       ],
     );
   }
 }
 
-/// Visual stock status derived from quantity (display only).
-enum _InventoryStockStatus {
-  inStock,
-  lowStock,
-  outOfStock;
+class _OccupancyChip extends StatelessWidget {
+  const _OccupancyChip({required this.occupied});
 
-  static _InventoryStockStatus fromQuantity(int qty) {
-    if (qty <= 0) return _InventoryStockStatus.outOfStock;
-    if (qty <= 2) return _InventoryStockStatus.lowStock;
-    return _InventoryStockStatus.inStock;
-  }
-
-  String get label => switch (this) {
-        _InventoryStockStatus.inStock => 'In Stock',
-        _InventoryStockStatus.lowStock => 'Low Stock',
-        _InventoryStockStatus.outOfStock => 'Out of Stock',
-      };
-
-  Color get quantityColor => switch (this) {
-        _InventoryStockStatus.inStock => AppColors.stockHealthy,
-        _InventoryStockStatus.lowStock => AppColors.stockLowFg,
-        _InventoryStockStatus.outOfStock => AppColors.stockOut,
-      };
-}
-
-class _InventoryStatusChip extends StatelessWidget {
-  const _InventoryStatusChip({required this.status});
-
-  final _InventoryStockStatus status;
+  final bool occupied;
 
   @override
   Widget build(BuildContext context) {
-    final (bg, fg, border) = switch (status) {
-      _InventoryStockStatus.inStock => (
-          AppColors.stockHealthyBg,
-          AppColors.stockHealthyFg,
-          AppColors.stockHealthyBorder,
-        ),
-      _InventoryStockStatus.lowStock => (
-          AppColors.stockLowBg,
-          AppColors.stockLowFg,
-          AppColors.stockLowBorder,
-        ),
-      _InventoryStockStatus.outOfStock => (
-          AppColors.stockOutBg,
-          AppColors.stockOutFg,
-          AppColors.stockOutBorder,
-        ),
-    };
-
+    final bg = occupied ? AppColors.stockHealthyBg : AppColors.surfaceMuted;
+    final fg = occupied ? AppColors.stockHealthyFg : AppColors.muted;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: border, width: 1.2),
+        border: Border.all(
+          color: occupied
+              ? AppColors.stockHealthyBorder
+              : AppColors.tableBorder,
+        ),
       ),
       child: Text(
-        status.label,
+        occupied ? 'Occupied' : 'Empty',
         style: AppTextStyles.caption.copyWith(
           color: fg,
           fontWeight: FontWeight.w800,
           fontSize: 11,
-          letterSpacing: 0.15,
         ),
       ),
     );
@@ -898,6 +891,7 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
   final _itemId = TextEditingController();
   final _selling = TextEditingController();
   final _cost = TextEditingController();
+  final _imageUrl = TextEditingController();
   String _category = 'STATIONERY';
   List<String> _categories = const [
     'MEDICINE',
@@ -937,6 +931,7 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
     _itemId.dispose();
     _selling.dispose();
     _cost.dispose();
+    _imageUrl.dispose();
     super.dispose();
   }
 
@@ -945,6 +940,7 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
     final description = _description.text.trim();
     final brand = _brand.text.trim();
     final barcode = _barcode.text.trim();
+    final imageUrl = _imageUrl.text.trim();
     final selling = double.tryParse(_selling.text.trim());
     final cost = double.tryParse(_cost.text.trim()) ?? selling;
     if (name.isEmpty ||
@@ -953,6 +949,15 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
         barcode.isEmpty ||
         selling == null) {
       showAppSnackBar(context, 'Fill all required fields');
+      return;
+    }
+    if (imageUrl.isNotEmpty &&
+        !_looksLikeImageUrl(imageUrl) &&
+        _image == null) {
+      showAppSnackBar(
+        context,
+        'Image URL must be empty or a valid http(s) link',
+      );
       return;
     }
 
@@ -970,6 +975,7 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
         'category': _category,
         'brand': brand,
         'barcode': barcode,
+        'imageUrl': imageUrl,
         'sellingPrice': selling,
         'costPrice': cost ?? selling,
         'gstPercentage': 0,
@@ -1030,7 +1036,9 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
       if (!mounted) return;
       showAppSnackBar(
         context,
-        _image != null ? 'Item created with image' : 'Item created',
+        imageUrl.isNotEmpty || _image != null
+            ? 'Item created with image'
+            : 'Item created',
       );
       final assign = await showDialog<bool>(
         context: context,
@@ -1076,6 +1084,13 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
       ),
       body: ListView(
         children: [
+          ItemImageUrlField(controller: _imageUrl),
+          const SizedBox(height: 16),
+          Text(
+            'Or upload an image file (optional)',
+            style: AppTextStyles.caption,
+          ),
+          const SizedBox(height: 8),
           ProductImagePickerField(
             onChanged: (value) => setState(() => _image = value),
           ),
@@ -1137,6 +1152,15 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
   }
 }
 
+bool _looksLikeImageUrl(String value) {
+  if (value.startsWith('/')) return true;
+  final uri = Uri.tryParse(value);
+  if (uri == null) return false;
+  return uri.hasScheme &&
+      (uri.scheme == 'http' || uri.scheme == 'https') &&
+      uri.host.isNotEmpty;
+}
+
 class AdminEditItemScreen extends ConsumerStatefulWidget {
   const AdminEditItemScreen({super.key, required this.itemId});
 
@@ -1154,6 +1178,7 @@ class _AdminEditItemScreenState extends ConsumerState<AdminEditItemScreen> {
   final _brand = TextEditingController();
   final _selling = TextEditingController();
   final _cost = TextEditingController();
+  final _imageUrl = TextEditingController();
   String? _existingImageUrl;
   String? _itemMongoId;
   ProductImageSelection? _image;
@@ -1175,6 +1200,7 @@ class _AdminEditItemScreenState extends ConsumerState<AdminEditItemScreen> {
     _brand.dispose();
     _selling.dispose();
     _cost.dispose();
+    _imageUrl.dispose();
     super.dispose();
   }
 
@@ -1242,6 +1268,7 @@ class _AdminEditItemScreenState extends ConsumerState<AdminEditItemScreen> {
       _selling.text = '${itemMap['sellingPrice'] ?? ''}';
       _cost.text = '${itemMap['costPrice'] ?? ''}';
       _existingImageUrl = itemMap['imageUrl']?.toString();
+      _imageUrl.text = (_existingImageUrl ?? '').trim();
       setState(() => _loading = false);
     } catch (e) {
       setState(() {
@@ -1256,10 +1283,18 @@ class _AdminEditItemScreenState extends ConsumerState<AdminEditItemScreen> {
     if (id == null || id.isEmpty) return;
     final selling = double.tryParse(_selling.text.trim());
     final cost = double.tryParse(_cost.text.trim());
+    final imageUrl = _imageUrl.text.trim();
     if (_name.text.trim().isEmpty ||
         _description.text.trim().isEmpty ||
         selling == null) {
       showAppSnackBar(context, 'Name, description, and price are required');
+      return;
+    }
+    if (imageUrl.isNotEmpty && !_looksLikeImageUrl(imageUrl) && _image == null) {
+      showAppSnackBar(
+        context,
+        'Image URL must be empty or a valid http(s) link',
+      );
       return;
     }
 
@@ -1272,8 +1307,9 @@ class _AdminEditItemScreenState extends ConsumerState<AdminEditItemScreen> {
         'brand': _brand.text.trim(),
         'sellingPrice': selling,
         'costPrice': ?cost,
+        'imageUrl': imageUrl,
       });
-      if (_imageCleared && _image == null) {
+      if (_imageCleared && _image == null && imageUrl.isEmpty) {
         await catalog.removeItemImage(id);
         _existingImageUrl = null;
       } else if (_image != null) {
@@ -1286,6 +1322,8 @@ class _AdminEditItemScreenState extends ConsumerState<AdminEditItemScreen> {
         if ((_existingImageUrl ?? '').isEmpty) {
           throw Exception('Image upload did not return imageUrl');
         }
+      } else {
+        _existingImageUrl = imageUrl.isEmpty ? null : imageUrl;
       }
       await ref.read(adminViewModelProvider.notifier).refresh();
       if (!mounted) return;
@@ -1323,12 +1361,24 @@ class _AdminEditItemScreenState extends ConsumerState<AdminEditItemScreen> {
       ),
       body: ListView(
         children: [
+          ItemImageUrlField(controller: _imageUrl),
+          const SizedBox(height: 16),
+          Text(
+            'Or replace with an uploaded file (optional)',
+            style: AppTextStyles.caption,
+          ),
+          const SizedBox(height: 8),
           ProductImagePickerField(
             existingImageUrl: _existingImageUrl,
             onChanged: (value) {
               setState(() {
                 _image = value;
                 _imageCleared = value == null;
+                if (value == null) {
+                  // Keep typed URL unless user cleared the picker while URL empty.
+                } else {
+                  // File upload will overwrite URL after save.
+                }
               });
             },
           ),
@@ -1573,8 +1623,8 @@ class _AdminAssignStockScreenState extends ConsumerState<AdminAssignStockScreen>
       body: ListView(
         children: [
           Text(
-            'One physical box holds exactly one item. '
-            'Enter how many units to stock, then select that many empty boxes.',
+            'One physical box holds exactly one item (quantity = 1). '
+            'Enter how many boxes to stock, then select that many empty boxes.',
             style: AppTextStyles.caption,
           ),
           const SizedBox(height: 16),
@@ -1597,8 +1647,9 @@ class _AdminAssignStockScreenState extends ConsumerState<AdminAssignStockScreen>
             controller: _qty,
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
-              labelText: 'Quantity (units)',
-              helperText: 'Each unit needs its own empty box',
+              labelText: 'Number of boxes',
+              helperText:
+                  'Each selected box receives quantity 1 — not an aggregated qty',
             ),
             onChanged: _onQtyChanged,
           ),
@@ -1681,59 +1732,409 @@ class _AdminAssignStockScreenState extends ConsumerState<AdminAssignStockScreen>
   }
 }
 
-class AdminOrdersScreen extends ConsumerWidget {
+class AdminOrdersScreen extends ConsumerStatefulWidget {
   const AdminOrdersScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(adminViewModelProvider);
+  ConsumerState<AdminOrdersScreen> createState() => _AdminOrdersScreenState();
+}
 
+class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen> {
+  static const _filters = <(String, String?)>[
+    ('All', null),
+    ('Pending Collection', 'READY_FOR_COLLECTION'),
+    ('Collected', 'COLLECTED'),
+    ('Expired', 'EXPIRED'),
+    ('Cancelled', 'CANCELLED'),
+    ('Pending Payment', 'WAITING_PAYMENT'),
+  ];
+
+  String _filterLabel = 'All';
+  String? _statusFilter;
+  List<OrderSummary> _orders = const [];
+  bool _loading = true;
+  String? _error;
+  bool _busyAction = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(_load);
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final orders = await ref
+          .read(orderRepositoryProvider)
+          .list(status: _statusFilter);
+      if (!mounted) return;
+      setState(() {
+        _orders = orders;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = userFacingError(e);
+      });
+    }
+  }
+
+  String _fmt(DateTime? utc) {
+    if (utc == null) return '—';
+    final local = utc.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}';
+  }
+
+  Future<void> _confirmCancel(OrderSummary order) async {
+    final reasonController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel this order?'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Order: ${order.id}'),
+              Text(
+                'Customer: ${order.customerName.isNotEmpty ? order.customerName : '—'}'
+                '${order.customerEmail.isNotEmpty ? ' (${order.customerEmail})' : ''}',
+              ),
+              Text('Amount: ${MoneyFormat.format(order.total)}'),
+              Text('Locker: ${order.lockerName} (${order.lockerNumber})'),
+              Text(
+                'Box: ${order.boxes.isEmpty ? '—' : order.boxes.join(', ')}',
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'This marks the order CANCELLED. It does not unlock the locker '
+                'and does not automatically refund payment.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonController,
+                decoration: const InputDecoration(
+                  labelText: 'Reason (optional)',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Back'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cancel order'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      reasonController.dispose();
+      return;
+    }
+    setState(() => _busyAction = true);
+    try {
+      final id = order.mongoId.isNotEmpty ? order.mongoId : order.id;
+      await ref.read(orderRepositoryProvider).cancel(
+            id,
+            reason: reasonController.text.trim().isEmpty
+                ? null
+                : reasonController.text.trim(),
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Order cancelled. Refund (if any) must be handled separately.',
+          ),
+        ),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(userFacingError(e))),
+      );
+    } finally {
+      reasonController.dispose();
+      if (mounted) setState(() => _busyAction = false);
+    }
+  }
+
+  Future<void> _confirmDelete(OrderSummary order) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this order?'),
+        content: Text(
+          'Soft-delete ${order.id} (${order.status}).\n\n'
+          'Payment and transaction records are preserved.\n'
+          'Collected order history cannot be deleted here.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Back'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busyAction = true);
+    try {
+      final id = order.mongoId.isNotEmpty ? order.mongoId : order.id;
+      await ref.read(orderRepositoryProvider).deleteOrder(id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Order deleted (payment history kept)')),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(userFacingError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _busyAction = false);
+    }
+  }
+
+  void _showDetails(OrderSummary order) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(order.id, style: AppTextStyles.title),
+                const SizedBox(height: 12),
+                _detailRow('Customer',
+                    order.customerName.isEmpty ? '—' : order.customerName),
+                if (order.customerEmail.isNotEmpty)
+                  _detailRow('Email', order.customerEmail),
+                _detailRow('Amount', MoneyFormat.format(order.total)),
+                _detailRow('Payment', order.paymentStatus.isEmpty
+                    ? '—'
+                    : order.paymentStatus),
+                _detailRow('Order status', order.status),
+                _detailRow('Locker',
+                    '${order.lockerName} (${order.lockerNumber})'),
+                _detailRow(
+                  'Box',
+                  order.boxes.isEmpty ? '—' : order.boxes.join(', '),
+                ),
+                _detailRow(
+                  'Terminal',
+                  order.terminalNumber?.toString() ?? '—',
+                ),
+                _detailRow('Created', order.placedAt),
+                _detailRow('Paid', _fmt(order.paidAt)),
+                _detailRow('Deadline', _fmt(order.collectionDeadline)),
+                _detailRow('Collected', _fmt(order.collectedAt)),
+                _detailRow('Expired', _fmt(order.expiredAt)),
+                _detailRow('Cancelled', _fmt(order.cancelledAt)),
+                const SizedBox(height: 16),
+                if (order.isPendingCollection)
+                  PrimaryButton(
+                    label: 'Cancel order',
+                    onPressed: _busyAction
+                        ? null
+                        : () {
+                            Navigator.pop(ctx);
+                            _confirmCancel(order);
+                          },
+                  ),
+                if (order.isPendingCollection) const SizedBox(height: 8),
+                if (order.isExpired || order.isCancelled)
+                  SecondaryButton(
+                    label: 'Delete order',
+                    onPressed: _busyAction
+                        ? null
+                        : () {
+                            Navigator.pop(ctx);
+                            _confirmDelete(order);
+                          },
+                  ),
+                if (order.isPendingCollection) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Prefer Cancel for active orders. Delete is for expired/cancelled only.',
+                    style: AppTextStyles.caption,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(label, style: AppTextStyles.caption),
+          ),
+          Expanded(child: Text(value, style: AppTextStyles.body)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return PageScaffold(
       title: 'Orders management',
-      body: state.isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : state.orders.isEmpty
-              ? const EmptyState(
-                  message: 'No orders yet',
-                  icon: Icons.receipt_long_outlined,
-                )
-              : ListView.separated(
-                  itemCount: state.orders.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 40,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _filters.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final (label, status) = _filters[index];
+                final selected = label == _filterLabel;
+                return ChoiceChip(
+                  label: Text(label),
+                  selected: selected,
+                  onSelected: (_) {
+                    setState(() {
+                      _filterLabel = label;
+                      _statusFilter = status;
+                    });
+                    _load();
+                  },
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (_loading)
+            const Expanded(child: Center(child: CircularProgressIndicator()))
+          else if (_error != null)
+            Expanded(child: Center(child: Text(_error!)))
+          else if (_orders.isEmpty)
+            const Expanded(
+              child: EmptyState(
+                message: 'No orders for this filter',
+                icon: Icons.receipt_long_outlined,
+              ),
+            )
+          else
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _load,
+                child: ListView.separated(
+                  itemCount: _orders.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
-                    final order = state.orders[index];
+                    final order = _orders[index];
                     return SoftPanel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  order.id,
-                                  style:
-                                      AppTextStyles.title.copyWith(fontSize: 16),
+                      child: InkWell(
+                        onTap: () => _showDetails(order),
+                        borderRadius: BorderRadius.circular(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    order.id,
+                                    style: AppTextStyles.title
+                                        .copyWith(fontSize: 16),
+                                  ),
                                 ),
+                                Text(order.status, style: AppTextStyles.caption),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              order.customerName.isEmpty
+                                  ? order.lockerName
+                                  : '${order.customerName} · ${order.lockerName}',
+                              style: AppTextStyles.body,
+                            ),
+                            Text(
+                              'Payment: ${order.paymentStatus.isEmpty ? '—' : order.paymentStatus}'
+                              ' · Box ${order.boxes.isEmpty ? '—' : order.boxes.join(', ')}',
+                              style: AppTextStyles.caption,
+                            ),
+                            if (order.paidAt != null)
+                              Text(
+                                'Paid ${_fmt(order.paidAt)}'
+                                '${order.collectionDeadline != null ? ' · Due ${_fmt(order.collectionDeadline)}' : ''}',
+                                style: AppTextStyles.caption,
                               ),
-                              Text(order.status, style: AppTextStyles.caption),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '${order.lockerName} - ${order.itemCount} items',
-                            style: AppTextStyles.body,
-                          ),
-                          Text(order.placedAt, style: AppTextStyles.caption),
-                          const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: PriceText(order.total),
-                          ),
-                        ],
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                PriceText(order.total),
+                                const Spacer(),
+                                if (order.isPendingCollection)
+                                  TextButton(
+                                    onPressed: _busyAction
+                                        ? null
+                                        : () => _confirmCancel(order),
+                                    child: const Text('Cancel'),
+                                  ),
+                                if (order.isExpired || order.isCancelled)
+                                  TextButton(
+                                    onPressed: _busyAction
+                                        ? null
+                                        : () => _confirmDelete(order),
+                                    child: const Text('Delete'),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   },
                 ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
