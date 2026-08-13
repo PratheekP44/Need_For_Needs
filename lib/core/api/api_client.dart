@@ -69,27 +69,11 @@ class ApiClient {
     bool auth = true,
   }) {
     return _send(
-      () async {
-        final headers = await _headers(auth: auth);
-        final hasAuth = headers.containsKey('Authorization');
-        if (path.contains('payment') || path.contains('checkout')) {
-          authLog(
-            '[PAY403-DEBUG] → POST $path authHeaderPresent=$hasAuth',
-          );
-        }
-        final res = await _http.post(
-          _uri(path),
-          headers: headers,
-          body: body == null ? null : jsonEncode(body),
-        );
-        if (path.contains('payment') || path.contains('checkout')) {
-          authLog(
-            '[PAY403-DEBUG] ← POST $path status=${res.statusCode} '
-            'authHeaderPresent=$hasAuth body=${res.body}',
-          );
-        }
-        return res;
-      },
+      () async => _http.post(
+        _uri(path),
+        headers: await _headers(auth: auth),
+        body: body == null ? null : jsonEncode(body),
+      ),
       auth: auth,
     );
   }

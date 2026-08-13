@@ -70,57 +70,32 @@ function resolveCollectionParts(orderDoc) {
   return { lockerId: String(lockerId), boxId: String(boxId) };
 }
 
+/**
+ * Owner id whether `user` is a raw ObjectId or a populated User doc.
+ * Matches order.service / collectUnlock / unlockPayload convention.
+ */
+function ownerUserId(userRef) {
+  return String(userRef?._id || userRef || '');
+}
+
+function assertOwnedByAuth(auth, userRef) {
+  if (auth.role === 'admin') return;
+  if (ownerUserId(userRef) !== String(auth.sub)) {
+    throw new AppError('Forbidden', 403);
+  }
+}
+
 class PaymentService {
   /**
    * Creates a Razorpay TEST MODE order for an unpaid Campus Essentials order.
    * Does not reduce inventory.
    */
   async createOrder(auth, { orderId }) {
-    logger.info('[PAY403-DEBUG] createOrder route hit', {
-      authSub: auth?.sub,
-      authRole: auth?.role,
-      orderIdParam: orderId,
-    });
-
     const order = await orderRepository.findByIdOrOrderNumber(orderId);
     if (!order) {
       throw new AppError('Order not found', 404);
     }
-
-    // DEBUG ONLY — diagnose ownership 403 (do not log secrets/tokens).
-    const rawUser = order.user;
-    const ownerId =
-      rawUser && typeof rawUser === 'object'
-        ? String(rawUser._id || rawUser.id || '')
-        : String(rawUser || '');
-    const authSub = String(auth.sub || '');
-    const naiveStringUser = String(rawUser);
-    const naiveMatch = naiveStringUser === authSub;
-    const ownerMatch = ownerId === authSub;
-    logger.info('[PAY403-DEBUG] createOrder ownership check', {
-      orderMongoId: String(order._id),
-      orderNumber: order.orderNumber,
-      authSub,
-      authRole: auth.role,
-      orderUserType: rawUser == null ? 'null' : typeof rawUser,
-      orderUserIsPopulatedObject: Boolean(rawUser && typeof rawUser === 'object'),
-      ownerIdExtracted: ownerId || '(empty)',
-      naiveStringOrderUser: naiveStringUser.slice(0, 80),
-      naiveStringEqualsAuthSub: naiveMatch,
-      ownerIdEqualsAuthSub: ownerMatch,
-      willRejectWithForbidden:
-        auth.role !== 'admin' && !naiveMatch,
-    });
-
-    if (auth.role !== 'admin' && String(order.user) !== String(auth.sub)) {
-      logger.warn('[PAY403-DEBUG] REJECT 403 Forbidden — ownership check used String(order.user)', {
-        reason:
-          'order.user is populated; String(order.user) is not the user ObjectId, so it never equals auth.sub',
-        authSub,
-        ownerIdWouldHaveMatched: ownerMatch,
-      });
-      throw new AppError('Forbidden', 403);
-    }
+    assertOwnedByAuth(auth, order.user);
 
     if (order.status === 'EXPIRED' || order.status === 'CANCELLED') {
       throw new AppError('Order is no longer payable', 400);
@@ -271,22 +246,7 @@ class PaymentService {
       throw new AppError('Order not found for payment', 404);
     }
 
-    if (auth.role !== 'admin' && String(orderDoc.user) !== String(auth.sub)) {
-      const rawUser = orderDoc.user;
-      const ownerId =
-        rawUser && typeof rawUser === 'object'
-          ? String(rawUser._id || rawUser.id || '')
-          : String(rawUser || '');
-      logger.warn('[PAY403-DEBUG] verify REJECT 403 Forbidden — ownership check', {
-        authSub: auth.sub,
-        ownerIdExtracted: ownerId || '(empty)',
-        naiveStringOrderUser: String(rawUser).slice(0, 80),
-        orderUserIsPopulatedObject: Boolean(rawUser && typeof rawUser === 'object'),
-        reason:
-          'Same bug as createOrder: String(populated order.user) !== auth.sub',
-      });
-      throw new AppError('Forbidden', 403);
-    }
+    assertOwnedByAuth(auth, orderDoc.user);
 
     // Idempotent success — safe for client retries after a network blip.
     if (payment.status === 'SUCCESS' && orderDoc.paymentStatus === 'SUCCESS') {
@@ -473,9 +433,7 @@ class PaymentService {
     if (!order) {
       throw new AppError('Order not found', 404);
     }
-    if (auth.role !== 'admin' && String(order.user) !== String(auth.sub)) {
-      throw new AppError('Forbidden', 403);
-    }
+    assertOwnedByAuth(auth, order.user);
     if (order.paymentStatus === 'SUCCESS') {
       throw new AppError('Cannot fail a successful payment', 400);
     }
@@ -589,9 +547,7 @@ class PaymentService {
     if (!payment) {
       throw new AppError('Payment not found', 404);
     }
-    if (auth.role !== 'admin' && String(payment.user) !== String(auth.sub)) {
-      throw new AppError('Forbidden', 403);
-    }
+    assertOwnedByAuth(auth, payment.user);
     return formatPayment(payment);
   }
 
@@ -650,3 +606,5 @@ class PaymentService {
 
 module.exports = new PaymentService();
 module.exports.formatPayment = formatPayment;
+module.exports.ownerUserId = ownerUserId;
+module.exports.assertOwnedByAuth = assertOwnedByAuth;
