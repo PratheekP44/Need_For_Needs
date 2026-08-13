@@ -9,6 +9,8 @@ import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/money_format.dart';
+import '../../../core/utils/order_display.dart';
+import '../../../core/widgets/app_brand.dart';
 import '../../../core/widgets/page_scaffold.dart';
 import '../../../core/widgets/product_image.dart';
 import '../../../core/widgets/item_image_url_field.dart';
@@ -76,10 +78,14 @@ class _AdminLoginScreenState extends ConsumerState<AdminLoginScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Campus operator access', style: AppTextStyles.headline),
+            const Center(
+              child: AppBrand.full(iconHeight: 52, titleHeight: 32),
+            ),
+            const SizedBox(height: 24),
+            Text('Admin access', style: AppTextStyles.headline),
             const SizedBox(height: 8),
             Text(
-              'Manage lockers, inventory, and campus orders.',
+              'Manage lockers, inventory, items, and orders.',
               style: AppTextStyles.body.copyWith(color: AppColors.muted),
             ),
             const SizedBox(height: 28),
@@ -161,6 +167,14 @@ class AdminDashboardScreen extends ConsumerWidget {
               onRefresh: () => ref.read(adminViewModelProvider.notifier).refresh(),
               child: ListView(
                 children: [
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 16),
+                    child: AppBrand.full(
+                      iconHeight: 40,
+                      titleHeight: 28,
+                      alignment: MainAxisAlignment.start,
+                    ),
+                  ),
                   if (state.error != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
@@ -254,6 +268,11 @@ class AdminDashboardScreen extends ConsumerWidget {
                     onTap: () => context.push('/admin/lockers'),
                   ),
                   _AdminAction(
+                    icon: Icons.category_outlined,
+                    label: 'Item Management',
+                    onTap: () => context.push(RouteConstants.adminItems),
+                  ),
+                  _AdminAction(
                     icon: Icons.inventory_outlined,
                     label: 'Inventory management',
                     onTap: () => context.push('/admin/inventory'),
@@ -262,21 +281,6 @@ class AdminDashboardScreen extends ConsumerWidget {
                     icon: Icons.list_alt_rounded,
                     label: 'Orders management',
                     onTap: () => context.push('/admin/orders'),
-                  ),
-                  _AdminAction(
-                    icon: Icons.developer_board_rounded,
-                    label: 'Virtual MCU',
-                    onTap: () => context.push(RouteConstants.adminVirtualMcu),
-                  ),
-                  _AdminAction(
-                    icon: Icons.bluetooth_searching_rounded,
-                    label: 'BLE Debug (Phase 13A)',
-                    onTap: () => context.push(RouteConstants.adminBleDebug),
-                  ),
-                  _AdminAction(
-                    icon: Icons.developer_mode_rounded,
-                    label: 'BLE Demo',
-                    onTap: () => context.push(RouteConstants.adminBleDemo),
                   ),
                 ],
               ),
@@ -329,7 +333,7 @@ class AdminLockerManagementScreen extends ConsumerWidget {
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
             labelText: 'Terminal number (1–255)',
-            helperText: 'Physical locker controller id',
+            helperText: 'Controller id for this locker',
           ),
           autofocus: true,
         ),
@@ -413,13 +417,9 @@ class AdminLockerManagementScreen extends ConsumerWidget {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Open boxes ${locker.openBoxes}/${locker.totalBoxes}',
-                        style: AppTextStyles.body,
-                      ),
-                      Text(
                         locker.terminalNumber != null
-                            ? 'Terminal ${locker.terminalNumber}'
-                            : 'Terminal not set',
+                            ? '${locker.openBoxes}/${locker.totalBoxes} boxes open'
+                            : '${locker.totalBoxes} boxes · set terminal',
                         style: AppTextStyles.caption.copyWith(
                           color: locker.terminalNumber != null
                               ? AppColors.muted
@@ -427,7 +427,7 @@ class AdminLockerManagementScreen extends ConsumerWidget {
                         ),
                       ),
                       Text(
-                        '${locker.distanceMeters}m away',
+                        '${locker.distanceMeters}m',
                         style: AppTextStyles.caption,
                       ),
                       const Spacer(),
@@ -1936,33 +1936,67 @@ class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(order.id, style: AppTextStyles.title),
+                Text(
+                  order.itemNames.isNotEmpty
+                      ? order.itemNames.first
+                      : shortOrderLabel(order.id),
+                  style: AppTextStyles.title,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  shortOrderLabel(order.id),
+                  style: AppTextStyles.caption.copyWith(color: AppColors.muted),
+                ),
                 const SizedBox(height: 12),
                 _detailRow('Customer',
                     order.customerName.isEmpty ? '—' : order.customerName),
                 if (order.customerEmail.isNotEmpty)
                   _detailRow('Email', order.customerEmail),
                 _detailRow('Amount', MoneyFormat.format(order.total)),
-                _detailRow('Payment', order.paymentStatus.isEmpty
-                    ? '—'
-                    : order.paymentStatus),
-                _detailRow('Order status', order.status),
-                _detailRow('Locker',
-                    '${order.lockerName} (${order.lockerNumber})'),
+                _detailRow(
+                  'Payment',
+                  order.paymentStatus.isEmpty
+                      ? '—'
+                      : friendlyPaymentLabel(order.paymentStatus),
+                ),
+                _detailRow('Status', friendlyOrderStatus(order.status)),
+                _detailRow(
+                  'Locker',
+                  order.lockerName.isNotEmpty
+                      ? order.lockerName
+                      : order.lockerNumber,
+                ),
                 _detailRow(
                   'Box',
                   order.boxes.isEmpty ? '—' : order.boxes.join(', '),
-                ),
-                _detailRow(
-                  'Terminal',
-                  order.terminalNumber?.toString() ?? '—',
                 ),
                 _detailRow('Created', order.placedAt),
                 _detailRow('Paid', _fmt(order.paidAt)),
                 _detailRow('Deadline', _fmt(order.collectionDeadline)),
                 _detailRow('Collected', _fmt(order.collectedAt)),
-                _detailRow('Expired', _fmt(order.expiredAt)),
-                _detailRow('Cancelled', _fmt(order.cancelledAt)),
+                if (order.expiredAt != null)
+                  _detailRow('Expired', _fmt(order.expiredAt)),
+                if (order.cancelledAt != null)
+                  _detailRow('Cancelled', _fmt(order.cancelledAt)),
+                const SizedBox(height: 8),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  title: Text(
+                    'Advanced',
+                    style: AppTextStyles.label,
+                  ),
+                  children: [
+                    _detailRow('Order ID', order.id),
+                    if (order.mongoId.isNotEmpty && order.mongoId != order.id)
+                      _detailRow('Internal ID', order.mongoId),
+                    _detailRow(
+                      'Terminal',
+                      order.terminalNumber?.toString() ?? '—',
+                    ),
+                    if (order.lockerNumber.isNotEmpty)
+                      _detailRow('Locker number', order.lockerNumber),
+                  ],
+                ),
                 const SizedBox(height: 16),
                 if (order.isPendingCollection)
                   PrimaryButton(
@@ -1988,7 +2022,7 @@ class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen> {
                 if (order.isPendingCollection) ...[
                   const SizedBox(height: 8),
                   Text(
-                    'Prefer Cancel for active orders. Delete is for expired/cancelled only.',
+                    'Cancel active orders. Delete only expired or cancelled.',
                     style: AppTextStyles.caption,
                   ),
                 ],
@@ -2078,32 +2112,42 @@ class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen> {
                               children: [
                                 Expanded(
                                   child: Text(
-                                    order.id,
+                                    order.itemNames.isNotEmpty
+                                        ? order.itemNames.first
+                                        : shortOrderLabel(order.id),
                                     style: AppTextStyles.title
                                         .copyWith(fontSize: 16),
                                   ),
                                 ),
-                                Text(order.status, style: AppTextStyles.caption),
+                                Text(
+                                  friendlyOrderStatus(order.status),
+                                  style: AppTextStyles.caption,
+                                ),
                               ],
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              order.customerName.isEmpty
-                                  ? order.lockerName
-                                  : '${order.customerName} · ${order.lockerName}',
+                              [
+                                if (order.customerName.isNotEmpty)
+                                  order.customerName,
+                                if (order.lockerName.isNotEmpty)
+                                  order.lockerName,
+                                MoneyFormat.format(order.total),
+                              ].join(' · '),
                               style: AppTextStyles.body,
                             ),
                             Text(
-                              'Payment: ${order.paymentStatus.isEmpty ? '—' : order.paymentStatus}'
-                              ' · Box ${order.boxes.isEmpty ? '—' : order.boxes.join(', ')}',
+                              [
+                                if (order.boxes.isNotEmpty)
+                                  'Box ${order.boxes.join(', ')}',
+                                if (order.paidAt != null)
+                                  'Paid ${_fmt(order.paidAt)}',
+                                if (order.collectionDeadline != null &&
+                                    order.isPendingCollection)
+                                  'Due ${_fmt(order.collectionDeadline)}',
+                              ].join(' · '),
                               style: AppTextStyles.caption,
                             ),
-                            if (order.paidAt != null)
-                              Text(
-                                'Paid ${_fmt(order.paidAt)}'
-                                '${order.collectionDeadline != null ? ' · Due ${_fmt(order.collectionDeadline)}' : ''}',
-                                style: AppTextStyles.caption,
-                              ),
                             const SizedBox(height: 8),
                             Row(
                               children: [

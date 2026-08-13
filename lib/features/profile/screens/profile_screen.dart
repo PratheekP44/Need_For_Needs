@@ -425,16 +425,16 @@ class HelpScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     const faqs = [
       (
-        'How do I collect an order?',
-        'Go to Orders, open a ready order, then tap Collect Item near the locker.',
+        'How do I collect?',
+        'Open Orders, tap a ready order, then Collect near the locker.',
       ),
       (
         'Can I change locker?',
-        'Select a nearby locker from Home before checkout.',
+        'Choose a nearby locker from Home before checkout.',
       ),
       (
         'Payment failed?',
-        'Retry checkout. Payments are verified through the Campus Essentials backend (Razorpay test mode).',
+        'Try checkout again. If it keeps failing, contact support.',
       ),
     ];
 

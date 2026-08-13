@@ -6,6 +6,7 @@ import '../../../core/data/models.dart';
 import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../core/widgets/app_brand.dart';
 import '../../../core/widgets/product_card.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
@@ -145,14 +146,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                const AppBrand.full(
+                                  iconHeight: 40,
+                                  titleHeight: 28,
+                                  alignment: MainAxisAlignment.start,
+                                ),
+                                const SizedBox(height: 16),
                                 Text(
                                   '${_greeting()}, $firstName',
                                   style: AppTextStyles.caption,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'What do you need?',
-                                  style: AppTextStyles.headline,
                                 ),
                                 const SizedBox(height: 16),
                                 AppSearchField(

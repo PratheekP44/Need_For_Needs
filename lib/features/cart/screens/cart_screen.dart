@@ -420,7 +420,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Razorpay TEST MODE (backend signature verify)',
+                        'Pay securely',
                         style: AppTextStyles.body,
                       ),
                       if (_paying && _progress.isNotEmpty) ...[

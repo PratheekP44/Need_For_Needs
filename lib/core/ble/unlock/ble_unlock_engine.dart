@@ -27,7 +27,7 @@ class BleUnlockConnectResult {
   final bool notifyEnabled;
 }
 
-/// Shared BLE unlock engine used by Admin BLE Demo and production Collect.
+/// Shared BLE unlock engine used by production Collect.
 ///
 /// This is the single reference implementation proven on real LKRM-V2 hardware.
 /// It reuses [ConnectionManager] / [BleTransport] / [RealPacketBuilder] /
@@ -68,7 +68,7 @@ class BleUnlockEngine {
     return t is FlutterBlueTransport ? t : null;
   }
 
-  /// Scan nearby lockers (same transport path as BLE Demo).
+  /// Scan nearby lockers (production Collect path).
   Future<List<BleDevice>> scan({Duration? timeout}) async {
     BleLog.d('[BleUnlockEngine] Scan');
     await connection.ensurePermissions();
@@ -103,7 +103,7 @@ class BleUnlockEngine {
 
   /// Scan → Find device by name → Connect → MTU → Discover → Enable notifications.
   ///
-  /// Exact pipeline used by Admin BLE Demo on real hardware.
+  /// Exact pipeline used by production Collect on real hardware.
   Future<BleUnlockConnectResult> connect({
     String targetDeviceName = defaultTargetName,
     void Function(String stage)? onStage,

@@ -7,14 +7,15 @@ import '../core/constants/route_constants.dart';
 import '../core/providers/core_providers.dart';
 import '../core/widgets/main_shell.dart';
 import '../features/admin/screens/admin_dashboard_screen.dart';
+import '../features/admin/screens/admin_items_screen.dart';
 import '../features/auth/screens/splash_screen.dart';
 import '../features/ble_debug/screens/ble_debug_screen.dart';
-import '../features/ble_demo/screens/ble_demo_screen.dart';
 import '../features/cart/screens/cart_screen.dart';
 import '../features/developer_dashboard/screens/developer_dashboard_screen.dart';
 import '../features/home/screens/home_screen.dart';
 import '../features/inventory/screens/product_details_screen.dart';
 import '../features/locker/screens/locker_details_screen.dart';
+import '../features/orders/screens/order_details_screen.dart';
 import '../features/orders/screens/orders_screen.dart';
 import '../features/payment/screens/payment_success_screen.dart';
 import '../features/profile/screens/profile_screen.dart';
@@ -188,9 +189,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const PaymentSuccessScreen(),
       ),
       GoRoute(
+        path: RouteConstants.orderDetails,
+        name: RouteNames.orderDetails,
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          return OrderDetailsScreen(orderId: id);
+        },
+      ),
+      GoRoute(
         path: RouteConstants.collectItem,
         name: RouteNames.collectItem,
-        builder: (context, state) => const CollectItemScreen(),
+        builder: (context, state) {
+          final orderId = state.uri.queryParameters['orderId'];
+          return CollectItemScreen(orderId: orderId);
+        },
       ),
       GoRoute(
         path: RouteConstants.settings,
@@ -259,20 +271,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const AdminOrdersScreen(),
       ),
       GoRoute(
-        path: RouteConstants.adminVirtualMcu,
-        name: RouteNames.adminVirtualMcu,
-        // Reuses Phase 11.75 dashboard — Virtual MCU package unchanged.
-        builder: (context, state) => const DeveloperDashboardScreen(),
+        path: RouteConstants.adminItems,
+        name: RouteNames.adminItems,
+        builder: (context, state) => const AdminItemsScreen(),
       ),
       GoRoute(
-        path: RouteConstants.adminBleDebug,
-        name: RouteNames.adminBleDebug,
-        builder: (context, state) => const BleDebugScreen(),
+        path: RouteConstants.adminItemsAdd,
+        name: RouteNames.adminItemsAdd,
+        builder: (context, state) => const AdminAddItemScreen(),
       ),
       GoRoute(
-        path: RouteConstants.adminBleDemo,
-        name: RouteNames.adminBleDemo,
-        builder: (context, state) => const BleDemoScreen(),
+        path: RouteConstants.adminItemsEdit,
+        name: RouteNames.adminItemsEdit,
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          return AdminEditItemScreen(itemId: id);
+        },
       ),
     ],
   );

@@ -19,6 +19,16 @@ const paymentsRouter = express.Router();
 paymentRouter.post(
   '/create-order',
   authenticate,
+  (req, res, next) => {
+    const logger = require('../config/logger');
+    logger.info('[PAY403-DEBUG] middleware passed authenticate+entering authorize(user)', {
+      authSub: req.auth?.sub,
+      authRole: req.auth?.role,
+      path: req.originalUrl,
+      bodyOrderId: req.body?.orderId,
+    });
+    return next();
+  },
   authorize('user'),
   createPaymentOrderValidator,
   validate,

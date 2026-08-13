@@ -90,7 +90,7 @@ class ProductCard extends ConsumerWidget {
                   PriceText(product.price),
                   const SizedBox(height: 2),
                   Text(
-                    stock < 1 ? 'Out of stock' : '$stock available',
+                    stock < 1 ? 'Out of stock' : 'Available',
                     style: AppTextStyles.caption,
                   ),
                   const Spacer(),
@@ -164,7 +164,7 @@ class LockerCard extends StatelessWidget {
                     Text(locker.name, style: AppTextStyles.title.copyWith(fontSize: 16)),
                     const SizedBox(height: 4),
                     Text(
-                      '${locker.distanceMeters}m away - ${locker.availableItems} items',
+                      '${locker.distanceMeters}m · ${locker.availableItems} available',
                       style: AppTextStyles.caption,
                     ),
                     const SizedBox(height: 8),
@@ -177,7 +177,7 @@ class LockerCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        locker.status,
+                        locker.status == 'Online' ? 'Available' : locker.status,
                         style: AppTextStyles.caption.copyWith(
                           color: locker.status == 'Online'
                               ? AppColors.stockHealthyFg

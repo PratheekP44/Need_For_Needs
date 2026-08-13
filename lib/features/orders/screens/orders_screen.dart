@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/data/models.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../core/utils/collection_countdown.dart';
+import '../../../core/utils/order_display.dart';
 import '../../../core/widgets/product_image.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
@@ -20,19 +23,19 @@ class OrdersScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Order history'),
+        title: const Text('Orders'),
         automaticallyImplyLeading: false,
       ),
       body: ResponsiveCenter(
         maxWidth: 720,
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
         child: state.isLoading
             ? const Center(child: CircularProgressIndicator())
             : state.orders.isEmpty
                 ? EmptyState(
                     message: state.error ?? 'No orders yet',
                     icon: Icons.receipt_long_outlined,
-                    actionLabel: 'Browse lockers',
+                    actionLabel: 'Browse items',
                     onAction: () => context.go('/home'),
                   )
                 : RefreshIndicator(
@@ -40,158 +43,136 @@ class OrdersScreen extends ConsumerWidget {
                         ref.read(ordersViewModelProvider.notifier).refresh(),
                     child: ListView.separated(
                       itemCount: state.orders.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(height: 12),
+                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final order = state.orders[index];
-                        final ready = order.status == 'Ready to collect' &&
-                            order.canCollect;
-                        final expired = order.isExpired;
-                        final chip = _statusStyle(order.status);
-                        return SoftPanel(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      order.id,
-                                      style: AppTextStyles.title
-                                          .copyWith(fontSize: 16),
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: chip.$1,
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Text(
-                                      order.status,
-                                      style: AppTextStyles.caption.copyWith(
-                                        color: chip.$2,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '${order.lockerName} - ${order.lockerNumber}',
-                                style: AppTextStyles.caption,
-                              ),
-                              if (order.boxes.isNotEmpty)
-                                Text(
-                                  'Box ${order.boxes.join(', ')}',
-                                  style: AppTextStyles.caption,
-                                ),
-                              Text(order.placedAt, style: AppTextStyles.caption),
-                              if (order.isPendingCollection &&
-                                  order.collectionDeadline != null)
-                                Text(
-                                  'Collect by ${order.collectionDeadline!.toLocal()}',
-                                  style: AppTextStyles.caption,
-                                ),
-                              if (order.paymentStatus.isNotEmpty)
-                                Text(
-                                  'Payment: ${order.paymentStatus}',
-                                  style: AppTextStyles.caption,
-                                ),
-                              if (order.itemNames.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  order.itemNames.take(3).join(', '),
-                                  style: AppTextStyles.body,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                              if (order.itemImages.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  height: 48,
-                                  child: ListView.separated(
-                                    scrollDirection: Axis.horizontal,
-                                    itemCount: order.itemImages.length.clamp(0, 4),
-                                    separatorBuilder: (_, __) =>
-                                        const SizedBox(width: 8),
-                                    itemBuilder: (context, i) {
-                                      return ProductImage(
-                                        imageUrl: order.itemImages[i],
-                                        height: 48,
-                                        width: 48,
-                                        borderRadius: 8,
-                                        iconSize: 18,
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ],
-                              if (order.collectionToken.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Token: ${order.collectionToken}',
-                                  style: AppTextStyles.caption.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Text(
-                                    '${order.itemCount} items',
-                                    style: AppTextStyles.body,
-                                  ),
-                                  const Spacer(),
-                                  PriceText(order.total),
-                                ],
-                              ),
-                              if (ready) ...[
-                                const SizedBox(height: 12),
-                                PrimaryButton(
-                                  label: 'Collect Item',
-                                  onPressed: () =>
-                                      context.push('/collect-item'),
-                                ),
-                              ] else if (expired &&
-                                  order.status == 'Expired') ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Collection expired',
-                                  style: AppTextStyles.caption
-                                      .copyWith(color: AppColors.error),
-                                ),
-                              ],
-                            ],
-                          ),
-                        );
+                        return _OrderRow(order: order);
                       },
                     ),
                   ),
       ),
     );
   }
+}
 
-  (Color, Color) _statusStyle(String status) {
-    final lower = status.toLowerCase();
-    if (lower.contains('ready')) {
-      return (AppColors.chip, AppColors.primary);
+class _OrderRow extends StatelessWidget {
+  const _OrderRow({required this.order});
+
+  final OrderSummary order;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = order.itemNames.isNotEmpty
+        ? order.itemNames.first
+        : shortOrderLabel(order.id);
+    final more = order.itemNames.length > 1
+        ? ' +${order.itemNames.length - 1}'
+        : '';
+    final locker = order.lockerName.isNotEmpty
+        ? order.lockerName
+        : (order.lockerNumber.isNotEmpty ? order.lockerNumber : '');
+    final status = friendlyOrderStatus(order.status);
+    final ready = order.status == 'Ready to collect' && order.canCollect;
+    final day = order.paidAt != null
+        ? formatOrderDay(order.paidAt)
+        : formatOrderDay(null, fallback: order.placedAt);
+
+    String? countdown;
+    if (ready && order.collectionDeadline != null) {
+      final remaining =
+          collectionRemaining(deadline: order.collectionDeadline!);
+      if (remaining.inSeconds > 0) {
+        countdown = formatCollectionCountdown(remaining);
+      }
     }
-    if (lower.contains('cancel')) {
-      return (AppColors.cancelBg, AppColors.error);
-    }
-    if (lower.contains('collect') || lower.contains('complete')) {
-      return (AppColors.surfaceMuted, AppColors.muted);
-    }
-    if (lower.contains('paid') || lower.contains('confirm')) {
-      return (AppColors.paidBg, AppColors.paidFg);
-    }
-    return (AppColors.surfaceMuted, AppColors.primary);
+
+    final detailId =
+        order.mongoId.isNotEmpty ? order.mongoId : order.id;
+
+    return InkWell(
+      onTap: () => context.push('/orders/${Uri.encodeComponent(detailId)}'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (order.itemImages.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(right: 14),
+                child: ProductImage(
+                  imageUrl: order.itemImages.first,
+                  height: 56,
+                  width: 56,
+                  borderRadius: 12,
+                  iconSize: 22,
+                ),
+              ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$title$more',
+                    style: AppTextStyles.label.copyWith(fontSize: 16),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      PriceText(
+                        order.total,
+                        style: AppTextStyles.body.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (locker.isNotEmpty) ...[
+                        Text(
+                          '  ·  ',
+                          style: AppTextStyles.caption,
+                        ),
+                        Expanded(
+                          child: Text(
+                            locker,
+                            style: AppTextStyles.caption,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    countdown != null
+                        ? '$status · $countdown remaining'
+                        : [
+                            status,
+                            if (day.isNotEmpty) day,
+                          ].join(' · '),
+                    style: AppTextStyles.caption.copyWith(
+                      color: ready
+                          ? AppColors.primary
+                          : order.isExpired
+                              ? AppColors.error
+                              : AppColors.muted,
+                      fontWeight: ready ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(left: 8, top: 4),
+              child: Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.muted,
+                size: 22,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

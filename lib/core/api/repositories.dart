@@ -388,8 +388,11 @@ class CatalogRepository {
     return mapPhysicalLockerInventory(data);
   }
 
-  Future<List<Map<String, dynamic>>> listItems() async {
-    final data = asMap(await _api.get('/items', query: {'limit': '100'}));
+  Future<List<Map<String, dynamic>>> listItems({String? search}) async {
+    final query = <String, String>{'limit': '100'};
+    final q = search?.trim() ?? '';
+    if (q.isNotEmpty) query['search'] = q;
+    final data = asMap(await _api.get('/items', query: query));
     return asList(data['items']).map((e) => asMap(e)).toList();
   }
 
@@ -409,6 +412,10 @@ class CatalogRepository {
   ) async {
     final data = asMap(await _api.put('/items/$id', body: body));
     return asMap(data['item']);
+  }
+
+  Future<void> deleteItem(String id) async {
+    await _api.delete('/items/$id');
   }
 
   Future<Map<String, dynamic>> uploadItemImage({

@@ -30,7 +30,10 @@ class LockerDetailsScreen extends ConsumerWidget {
       ),
       error: (e, _) => PageScaffold(
         title: 'Locker',
-        body: Center(child: Text(e.toString())),
+        body: EmptyState(
+          message: userFacingError(e),
+          icon: Icons.error_outline_rounded,
+        ),
       ),
       data: (data) {
         final locker = data.locker;
@@ -43,56 +46,42 @@ class LockerDetailsScreen extends ConsumerWidget {
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                  child: SoftPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                locker.name,
-                                style: AppTextStyles.headline.copyWith(fontSize: 22),
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.chip,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(locker.status, style: AppTextStyles.label),
-                            ),
-                          ],
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        locker.name,
+                        style: AppTextStyles.headline.copyWith(fontSize: 22),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        [
+                          locker.status == 'Online' ? 'Available' : locker.status,
+                          if (locker.availableItems > 0)
+                            '${locker.availableItems} items',
+                          if (locker.totalBoxes > 0)
+                            '${locker.totalBoxes} boxes',
+                          if (locker.distanceMeters > 0)
+                            '${locker.distanceMeters}m',
+                        ].join(' · '),
+                        style: AppTextStyles.caption.copyWith(
+                          color: AppColors.muted,
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${locker.distanceMeters}m away - ${locker.availableItems} available items',
-                          style: AppTextStyles.caption,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Open boxes ${locker.openBoxes}/${locker.totalBoxes}',
-                          style: AppTextStyles.body,
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-                  child: Text('Available items', style: AppTextStyles.title),
+                  padding: const EdgeInsets.fromLTRB(20, 28, 20, 10),
+                  child: Text('Items', style: AppTextStyles.title),
                 ),
               ),
               if (items.isEmpty)
                 const SliverToBoxAdapter(
                   child: EmptyState(
-                    message: 'No items available in this locker',
+                    message: 'No items here',
                     icon: Icons.inventory_2_outlined,
                   ),
                 )

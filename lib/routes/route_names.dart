@@ -9,6 +9,7 @@ class RouteNames {
 
   static const String home = 'home';
   static const String orders = 'orders';
+  static const String orderDetails = 'orderDetails';
   static const String profile = 'profile';
 
   static const String lockerDetails = 'lockerDetails';
@@ -29,8 +30,8 @@ class RouteNames {
   static const String adminInventoryEdit = 'adminInventoryEdit';
   static const String adminInventoryAssign = 'adminInventoryAssign';
   static const String adminOrders = 'adminOrders';
-  static const String adminVirtualMcu = 'adminVirtualMcu';
-  static const String adminBleDebug = 'adminBleDebug';
-  static const String adminBleDemo = 'adminBleDemo';
+  static const String adminItems = 'adminItems';
+  static const String adminItemsAdd = 'adminItemsAdd';
+  static const String adminItemsEdit = 'adminItemsEdit';
   static const String bleDebug = 'bleDebug';
 }

@@ -76,11 +76,49 @@ class PaymentService {
    * Does not reduce inventory.
    */
   async createOrder(auth, { orderId }) {
+    logger.info('[PAY403-DEBUG] createOrder route hit', {
+      authSub: auth?.sub,
+      authRole: auth?.role,
+      orderIdParam: orderId,
+    });
+
     const order = await orderRepository.findByIdOrOrderNumber(orderId);
     if (!order) {
       throw new AppError('Order not found', 404);
     }
+
+    // DEBUG ONLY — diagnose ownership 403 (do not log secrets/tokens).
+    const rawUser = order.user;
+    const ownerId =
+      rawUser && typeof rawUser === 'object'
+        ? String(rawUser._id || rawUser.id || '')
+        : String(rawUser || '');
+    const authSub = String(auth.sub || '');
+    const naiveStringUser = String(rawUser);
+    const naiveMatch = naiveStringUser === authSub;
+    const ownerMatch = ownerId === authSub;
+    logger.info('[PAY403-DEBUG] createOrder ownership check', {
+      orderMongoId: String(order._id),
+      orderNumber: order.orderNumber,
+      authSub,
+      authRole: auth.role,
+      orderUserType: rawUser == null ? 'null' : typeof rawUser,
+      orderUserIsPopulatedObject: Boolean(rawUser && typeof rawUser === 'object'),
+      ownerIdExtracted: ownerId || '(empty)',
+      naiveStringOrderUser: naiveStringUser.slice(0, 80),
+      naiveStringEqualsAuthSub: naiveMatch,
+      ownerIdEqualsAuthSub: ownerMatch,
+      willRejectWithForbidden:
+        auth.role !== 'admin' && !naiveMatch,
+    });
+
     if (auth.role !== 'admin' && String(order.user) !== String(auth.sub)) {
+      logger.warn('[PAY403-DEBUG] REJECT 403 Forbidden — ownership check used String(order.user)', {
+        reason:
+          'order.user is populated; String(order.user) is not the user ObjectId, so it never equals auth.sub',
+        authSub,
+        ownerIdWouldHaveMatched: ownerMatch,
+      });
       throw new AppError('Forbidden', 403);
     }
 
@@ -234,6 +272,19 @@ class PaymentService {
     }
 
     if (auth.role !== 'admin' && String(orderDoc.user) !== String(auth.sub)) {
+      const rawUser = orderDoc.user;
+      const ownerId =
+        rawUser && typeof rawUser === 'object'
+          ? String(rawUser._id || rawUser.id || '')
+          : String(rawUser || '');
+      logger.warn('[PAY403-DEBUG] verify REJECT 403 Forbidden — ownership check', {
+        authSub: auth.sub,
+        ownerIdExtracted: ownerId || '(empty)',
+        naiveStringOrderUser: String(rawUser).slice(0, 80),
+        orderUserIsPopulatedObject: Boolean(rawUser && typeof rawUser === 'object'),
+        reason:
+          'Same bug as createOrder: String(populated order.user) !== auth.sub',
+      });
       throw new AppError('Forbidden', 403);
     }
 

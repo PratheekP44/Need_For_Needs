@@ -16,7 +16,7 @@ import 'ble_unlock_engine.dart';
 
 /// Orchestrates unlock → optional backend confirm.
 ///
-/// Real hardware delegates to [BleUnlockEngine] (same path as Admin BLE Demo).
+/// Real hardware delegates to [BleUnlockEngine] (production Collect path).
 /// Virtual MCU / mock keeps Phase-10 via [PacketBuilder] + [LockerService].
 ///
 /// Production Collect (Phase 17) calls [BleUnlockEngine] directly; this class

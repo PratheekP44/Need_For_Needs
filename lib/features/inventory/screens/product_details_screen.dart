@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/data/models.dart';
 import '../../../core/providers/catalog_refresh.dart';
@@ -79,30 +78,17 @@ class _ProductDetailsScreenState extends ConsumerState<ProductDetailsScreen> {
         }
 
         return PageScaffold(
-          title: 'Product details',
-          bottom: Row(
-            children: [
-              Expanded(
-                child: SecondaryButton(
-                  label: 'View Cart',
-                  onPressed: () => context.push('/cart'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: PrimaryButton(
-                  label: outOfStock
-                      ? 'Out of stock'
-                      : _busy
-                          ? 'Adding…'
-                          : 'Add to Cart',
-                  isLoading: _busy,
-                  onPressed: outOfStock || _busy
-                      ? null
-                      : () => _addToCart(product),
-                ),
-              ),
-            ],
+          title: product.name,
+          bottom: PrimaryButton(
+            label: outOfStock
+                ? 'Out of stock'
+                : _busy
+                    ? 'Adding…'
+                    : 'Add to Cart',
+            isLoading: _busy,
+            onPressed: outOfStock || _busy
+                ? null
+                : () => _addToCart(product),
           ),
           body: ListView(
             children: [
@@ -134,12 +120,14 @@ class _ProductDetailsScreenState extends ConsumerState<ProductDetailsScreen> {
                     const SizedBox(height: 8),
                     Text(
                       outOfStock
-                          ? 'Currently unavailable'
-                          : '$stock in stock at ${locker?.name ?? 'locker'}',
+                          ? 'Unavailable'
+                          : (locker?.name.isNotEmpty == true
+                              ? 'Available · ${locker!.name}'
+                              : 'Available'),
                       style: AppTextStyles.caption,
                     ),
                     if (!outOfStock) ...[
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 20),
                       Row(
                         children: [
                           Text('Quantity', style: AppTextStyles.label),
@@ -156,46 +144,15 @@ class _ProductDetailsScreenState extends ConsumerState<ProductDetailsScreen> {
                         ],
                       ),
                     ],
-                    const SizedBox(height: 16),
-                    SoftPanel(
-                      child: Text(
-                        product.description,
-                        style: AppTextStyles.body,
+                    if (product.description.trim().isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      Text(
+                        product.description.trim(),
+                        style: AppTextStyles.body.copyWith(
+                          color: AppColors.muted,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    SoftPanel(
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.lock_outline_rounded,
-                            color: AppColors.primary,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Pickup locker',
-                                  style: AppTextStyles.label,
-                                ),
-                                Text(
-                                  locker?.name ?? 'Assigned locker',
-                                  style: AppTextStyles.body,
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (locker != null)
-                            TextButton(
-                              onPressed: () =>
-                                  context.push('/locker/${locker.id}'),
-                              child: const Text('Open'),
-                            ),
-                        ],
-                      ),
-                    ),
+                    ],
                   ],
                 ),
               ),

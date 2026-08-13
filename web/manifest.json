@@ -1,11 +1,11 @@
 {
-    "name": "need_for_needs",
-    "short_name": "need_for_needs",
+    "name": "Need For Needs",
+    "short_name": "Need For Needs",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#222831",
+    "theme_color": "#222831",
+    "description": "Need For Needs — smart campus lockers.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

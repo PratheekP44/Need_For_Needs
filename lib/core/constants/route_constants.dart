@@ -9,6 +9,7 @@ class RouteConstants {
 
   static const String home = '/home';
   static const String orders = '/orders';
+  static const String orderDetails = '/orders/:id';
   static const String profile = '/profile';
 
   static const String lockerDetails = '/locker/:id';
@@ -19,7 +20,9 @@ class RouteConstants {
   static const String collectItem = '/collect-item';
   static const String settings = '/settings';
   static const String help = '/help';
+  /// Hidden engineering entry (splash / settings) — not Admin Portal.
   static const String developerDashboard = '/developer-dashboard';
+  static const String bleDebug = '/ble-debug';
 
   static const String adminLogin = '/admin/login';
   static const String adminDashboard = '/admin/dashboard';
@@ -29,8 +32,7 @@ class RouteConstants {
   static const String adminInventoryEdit = '/admin/inventory/edit/:id';
   static const String adminInventoryAssign = '/admin/inventory/assign';
   static const String adminOrders = '/admin/orders';
-  static const String adminVirtualMcu = '/admin/virtual-mcu';
-  static const String adminBleDebug = '/admin/ble-debug';
-  static const String adminBleDemo = '/admin/ble-demo';
-  static const String bleDebug = '/ble-debug';
+  static const String adminItems = '/admin/items';
+  static const String adminItemsAdd = '/admin/items/add';
+  static const String adminItemsEdit = '/admin/items/edit/:id';
 }

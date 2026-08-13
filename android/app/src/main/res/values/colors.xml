@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#222831</color>
+    <!-- Matches AppColors.background (#DFD0B8) for native launch window -->
+    <color name="launch_background">#DFD0B8</color>
+</resources>

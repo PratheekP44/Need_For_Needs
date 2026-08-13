@@ -1,24 +1,26 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:need_for_needs/core/ble/ble.dart';
-import 'package:need_for_needs/features/ble_demo/models/ble_demo_packet_request.dart';
 
 void main() {
-  group('BleDemoPacketRequest', () {
-    test('maps multi-box to RealPacketBuilder 32-byte OPEN', () {
-      const demo = BleDemoPacketRequest(
-        command: FirmwareCommand.open,
+  group('RealPacketBuilder (Collect / production path)', () {
+    test('maps multi-box to 32-byte OPEN', () {
+      const request = UnlockPacketRequest(
+        transactionId: 'TX1',
+        orderId: 'ORD1',
+        lockerId: 'LCK',
+        boxId: '1',
+        collectionToken: 'tok',
         port: 1,
+        boxNumber: 1,
         boxNumbers: [1],
         terminalNumber: 1,
-        orderId: 'ORD1',
         itemId: 'ITEM1',
-        transactionId: 'TX1',
       );
 
       const builder = RealPacketBuilder();
       final packet = builder.build(
-        command: demo.command,
-        request: demo.toUnlockPacketRequest(),
+        command: FirmwareCommand.open,
+        request: request,
       );
 
       expect(packet.length, 32);
@@ -29,16 +31,21 @@ void main() {
     });
 
     test('CUSTOM opcode with multi-box', () {
-      const demo = BleDemoPacketRequest(
-        command: 0xAB,
+      const request = UnlockPacketRequest(
+        transactionId: 'TX',
+        orderId: 'ORD',
+        lockerId: 'LCK',
+        boxId: '2',
+        collectionToken: 'tok',
         port: 2,
+        boxNumber: 2,
         boxNumbers: [2, 3],
         terminalNumber: 4,
       );
       const builder = RealPacketBuilder();
       final packet = builder.build(
-        command: demo.command,
-        request: demo.toUnlockPacketRequest(),
+        command: 0xAB,
+        request: request,
       );
       expect(packet.length, 32);
       expect(packet[0], 0xAB);

@@ -110,7 +110,7 @@ class ItemService {
         isActive: 'isActive',
         itemId: 'itemId',
       },
-      searchFields: ['name', 'brand', 'barcode', 'itemId', 'description'],
+      searchFields: ['name', 'brand', 'barcode', 'itemId', 'description', 'category'],
     });
 
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
@@ -216,7 +216,44 @@ class ItemService {
     const linkedStock = await stockRepository.countByItem(item._id);
     if (linkedStock > 0) {
       throw new AppError(
-        'Cannot delete item while stock records still reference it',
+        'Cannot delete this item because it is currently assigned to inventory',
+        409,
+      );
+    }
+
+    const Cart = require('../models/Cart');
+    const activeCart = await Cart.findOne({
+      'items.item': item._id,
+      status: 'ACTIVE',
+    })
+      .select('_id')
+      .lean()
+      .exec();
+    if (activeCart) {
+      throw new AppError(
+        'Cannot delete this item because it is in one or more active carts',
+        409,
+      );
+    }
+
+    const Order = require('../models/Order');
+    const blockingOrder = await Order.findOne({
+      'items.item': item._id,
+      status: {
+        $in: [
+          'CREATED',
+          'WAITING_PAYMENT',
+          'PAYMENT_SUCCESS',
+          'READY_FOR_COLLECTION',
+        ],
+      },
+    })
+      .select('orderNumber status')
+      .lean()
+      .exec();
+    if (blockingOrder) {
+      throw new AppError(
+        `Cannot delete this item because it is referenced by active order ${blockingOrder.orderNumber}`,
         409,
       );
     }

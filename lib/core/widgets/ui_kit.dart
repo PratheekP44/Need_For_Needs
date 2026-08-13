@@ -39,7 +39,7 @@ class SectionHeader extends StatelessWidget {
 class AppSearchField extends StatelessWidget {
   const AppSearchField({
     super.key,
-    this.hint = 'Search campus essentials',
+    this.hint = 'Search',
     this.onTap,
     this.onChanged,
     this.onFilterPressed,

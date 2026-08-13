@@ -39,14 +39,15 @@ class CheckoutPaymentService {
     var openedCheckout = false;
 
     try {
-      onProgress?.call('Creating order…');
+      onProgress?.call('Preparing…');
+
       final orderRaw = await orders.checkoutRaw();
       orderId = orderRaw['id']?.toString() ?? '';
       if (orderId.isEmpty) {
         throw PaymentFlowException('Checkout did not return an order id');
       }
 
-      onProgress?.call('Creating Razorpay payment…');
+      onProgress?.call('Starting payment…');
       final created = await payments.createOrder(orderId: orderId);
       final razorpay =
           Map<String, dynamic>.from(created['razorpay'] as Map? ?? {});
@@ -82,7 +83,7 @@ class CheckoutPaymentService {
         );
       }
 
-      onProgress?.call('Opening Razorpay Checkout…');
+      onProgress?.call('Opening checkout…');
       openedCheckout = true;
       final result = await _openRazorpaySdk(razorpay);
       final paymentId = result.paymentId;
@@ -94,7 +95,7 @@ class CheckoutPaymentService {
         );
       }
 
-      onProgress?.call('Verifying payment…');
+      onProgress?.call('Confirming…');
       final verified = await payments.verify(
         razorpayOrderId: gatewayOrderId,
         razorpayPaymentId: paymentId,
@@ -116,7 +117,7 @@ class CheckoutPaymentService {
         );
       }
 
-      onProgress?.call('Payment confirmed');
+      onProgress?.call('Done');
       return OrderPaymentResult(
         orderId: orderId,
         orderNumber: orderMap['orderNumber']?.toString() ?? orderId,

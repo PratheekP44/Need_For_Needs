@@ -9,6 +9,8 @@ import '../../../core/constants/route_constants.dart';
 import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../core/widgets/app_brand.dart';
+import '../../../core/widgets/locker_init_indicator.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
 import '../../../core/widgets/ux.dart';
@@ -24,7 +26,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _fade;
-  late final Animation<double> _scale;
   int _logoPresses = 0;
   Timer? _navTimer;
   bool _unlockedDeveloper = false;
@@ -34,12 +35,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
+      duration: const Duration(milliseconds: 700),
     );
     _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
-    _scale = Tween(begin: 0.92, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
-    );
     _controller.forward();
     // Hold splash long enough for 5× logo long-press developer unlock.
     _armSplashRelease();
@@ -87,55 +85,35 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: AppColors.splashGradient,
-        ),
+      backgroundColor: AppColors.background,
+      body: SafeArea(
         child: FadeTransition(
           opacity: _fade,
-          child: ScaleTransition(
-            scale: _scale,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                GestureDetector(
-                  onLongPress: _onLogoLongPress,
-                  child: Container(
-                    padding: const EdgeInsets.all(22),
-                    decoration: BoxDecoration(
-                      color: AppColors.onPrimary.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(28),
-                    ),
-                    child: const Icon(
-                      Icons.lock_open_rounded,
-                      size: 56,
-                      color: AppColors.onPrimary,
-                    ),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AppBrand.stacked(
+                    iconHeight: 96,
+                    titleHeight: 30,
+                    spacing: 20,
+                    onLongPress: _onLogoLongPress,
                   ),
-                ),
-                const SizedBox(height: 28),
-                Text(
-                  'Need For Needs',
-                  style: AppTextStyles.display.copyWith(color: AppColors.onPrimary),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Campus Essentials - Smart Lockers',
-                  style: AppTextStyles.body.copyWith(
-                    color: AppColors.onPrimary.withValues(alpha: 0.85),
-                  ),
-                ),
-                if (_logoPresses > 0 && _logoPresses < 5) ...[
-                  const SizedBox(height: 20),
-                  Text(
-                    'Developer unlock $_logoPresses/5',
-                    style: AppTextStyles.caption.copyWith(
-                      color: AppColors.onPrimary.withValues(alpha: 0.7),
+                  const SizedBox(height: 36),
+                  const LockerInitIndicator(),
+                  if (_logoPresses > 0 && _logoPresses < 5) ...[
+                    const SizedBox(height: 24),
+                    Text(
+                      'Developer unlock $_logoPresses/5',
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.muted,
+                      ),
                     ),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
@@ -205,12 +183,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 24),
-                Text('Welcome back', style: AppTextStyles.display.copyWith(fontSize: 28)),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
+                const Center(
+                  child: AppBrand.full(iconHeight: 56, titleHeight: 34),
+                ),
+                const SizedBox(height: 28),
                 Text(
-                  'Sign in to unlock nearby campus lockers.',
-                  style: AppTextStyles.body.copyWith(color: AppColors.muted),
+                  'Welcome back',
+                  style: AppTextStyles.display.copyWith(fontSize: 28),
                 ),
                 const SizedBox(height: 36),
                 TextField(
@@ -353,12 +333,11 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         padding: const EdgeInsets.all(24),
         child: ListView(
           children: [
-            Text('Join Campus Essentials', style: AppTextStyles.headline),
-            const SizedBox(height: 8),
-            Text(
-              'Pick up snacks, stationery, and more from smart lockers.',
-              style: AppTextStyles.body.copyWith(color: AppColors.muted),
+            const Center(
+              child: AppBrand.full(iconHeight: 52, titleHeight: 32),
             ),
+            const SizedBox(height: 24),
+            Text('Create account', style: AppTextStyles.headline),
             const SizedBox(height: 28),
             TextField(
               controller: _name,
@@ -446,10 +425,14 @@ class LocationPermissionScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 28),
-              Text('Find nearby lockers', style: AppTextStyles.headline, textAlign: TextAlign.center),
+              Text(
+                'Find nearby lockers',
+                style: AppTextStyles.headline,
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 12),
               Text(
-                'Allow location access so we can show lockers around your campus and walking distance.',
+                'Location helps show lockers near you.',
                 style: AppTextStyles.body.copyWith(color: AppColors.muted),
                 textAlign: TextAlign.center,
               ),
