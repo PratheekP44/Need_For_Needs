@@ -37,6 +37,8 @@ export 'transport/ble_link_state.dart';
 export 'transport/ble_log.dart';
 export 'transport/ble_pipeline_timer.dart';
 export 'transport/ble_transport.dart';
+export 'transport/ble_write_payload.dart';
+export 'transport/collect_ble_profiler.dart';
 export 'transport/flutter_blue_transport.dart';
 export 'transport/mock_ble_transport.dart';
 export 'transport/virtual_mcu_transport.dart';

@@ -13,6 +13,7 @@ import 'ble_link_state.dart';
 import 'ble_log.dart';
 import 'ble_pipeline_timer.dart';
 import 'ble_transport.dart';
+import 'ble_write_payload.dart';
 
 /// Snapshot of a discovered GATT service (debug / BLE Test screen).
 class GattServiceInfo {
@@ -66,6 +67,8 @@ class FlutterBlueTransport implements BleTransport {
   final Map<String, BleDevice> _seen = {};
   final Queue<_WriteJob> _writeQueue = Queue<_WriteJob>();
   bool _writePumpRunning = false;
+  /// Monotonic counter for Phase 29 WRITE# logging (resets on disconnect).
+  int _writeSequence = 0;
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _writeChar;
@@ -325,25 +328,42 @@ class FlutterBlueTransport implements BleTransport {
   Future<List<BleDevice>> startScan({
     required Duration timeout,
     String? namePrefix,
+    bool stopOnTarget = false,
   }) async {
-    // namePrefix intentionally ignored during debug — show ALL BLE devices.
-    // Re-introduce production filters only after discovery is proven.
+    // namePrefix intentionally ignored — Android ScanFilter on name/UUID was
+    // hiding LKRM-V2 when it only advertises MSD. Match in software instead.
     await ensurePermissions();
     await _checkBtEnabled();
-    final scanFor = timeout < const Duration(seconds: 15)
-        ? const Duration(seconds: 15)
+
+    // Phase 31: respect caller timeout. Previous min-15s clamp forced Collect
+    // to wait ~15s even after LKRM-V2 was already visible.
+    final scanFor = timeout <= Duration.zero
+        ? const Duration(seconds: 5)
         : timeout;
+
     BleLog.d(
-      'Scan start UNFILTERED timeout=${scanFor.inSeconds}s '
-      'mode=lowLatency continuousUpdates=true '
-      '(debug: no UUID/name/MSD/RSSI filters)',
+      '[Phase31] SCAN_START timeout=${scanFor.inMilliseconds}ms '
+      'stopOnTarget=$stopOnTarget mode=lowLatency continuousUpdates=true',
     );
+    final scanSw = Stopwatch()..start();
 
     _seen.clear();
     await _scanSub?.cancel();
     if (FlutterBluePlus.isScanningNow) {
       BleLog.d('Stopping previous scan before restart');
       await FlutterBluePlus.stopScan();
+    }
+
+    final earlyStop = Completer<void>();
+
+    void considerEarlyStop(BleDevice device) {
+      if (!stopOnTarget || earlyStop.isCompleted) return;
+      if (!device.isTargetLocker) return;
+      BleLog.d(
+        '[Phase31] DEVICE_FOUND name=${device.name} id=${device.id} '
+        'rssi=${device.rssi} t=${scanSw.elapsedMilliseconds}ms — early SCAN_STOP',
+      );
+      earlyStop.complete();
     }
 
     _scanSub = FlutterBluePlus.scanResults.listen(
@@ -372,6 +392,7 @@ class FlutterBlueTransport implements BleTransport {
             isTargetLocker: isTarget,
           );
           _seen[device.id] = device;
+          considerEarlyStop(device);
         }
         final sorted = _seen.values.toList()
           ..sort((a, b) {
@@ -401,8 +422,10 @@ class FlutterBlueTransport implements BleTransport {
         androidUsesFineLocation: false,
         androidCheckLocationServices: false,
       );
-      BleLog.d('FlutterBluePlus.startScan invoked isScanningNow='
-          '${FlutterBluePlus.isScanningNow}');
+      BleLog.d(
+        'FlutterBluePlus.startScan invoked isScanningNow='
+        '${FlutterBluePlus.isScanningNow}',
+      );
     } catch (e) {
       BleLog.e('FlutterBluePlus.startScan failed', e);
       await _scanSub?.cancel();
@@ -410,20 +433,25 @@ class FlutterBlueTransport implements BleTransport {
       rethrow;
     }
 
-    // Wait until FBP timeout stops scanning, with a hard safety cap so the
-    // BLE Debug spinner can never spin forever.
     try {
-      await FlutterBluePlus.isScanning
-          .where((scanning) => scanning == false)
-          .first
-          .timeout(scanFor + const Duration(seconds: 3));
+      await Future.any<void>([
+        earlyStop.future,
+        FlutterBluePlus.isScanning
+            .where((scanning) => scanning == false)
+            .first
+            .then((_) {}),
+        Future<void>.delayed(scanFor + const Duration(milliseconds: 500)),
+      ]);
     } on TimeoutException {
       BleLog.e('Scan wait timed out — forcing stopScan');
-      await stopScan();
     } catch (e) {
       BleLog.e('Scan wait error', e);
-      await stopScan();
     }
+
+    BleLog.d(
+      '[Phase31] SCAN_STOP elapsed=${scanSw.elapsedMilliseconds}ms '
+      'early=${earlyStop.isCompleted}',
+    );
     await stopScan();
 
     final sorted = _seen.values.toList()
@@ -611,6 +639,8 @@ class FlutterBlueTransport implements BleTransport {
     _secondaryWriteChar = null;
     discoveredServices = const [];
     lastMtu = null;
+    _writeSequence = 0;
+    _writePumpRunning = false;
     connectedAt = null;
     _connected = false;
     hasSecondaryWriteCharacteristic = false;
@@ -839,6 +869,10 @@ class FlutterBlueTransport implements BleTransport {
   }
 
   /// Write to C1 (AUTH / Phase 10) or C3 (command) — Java dual-char path.
+  ///
+  /// Phase 29: always copies [bytes], serializes via [_writeQueue], prefers a
+  /// single ATT write when MTU allows, otherwise FBP long-write (not ad-hoc
+  /// multi-write chunking that can leave the char partially written).
   Future<void> writeTo(
     BleWriteTarget target,
     Uint8List bytes, {
@@ -868,45 +902,108 @@ class FlutterBlueTransport implements BleTransport {
       );
     }
 
-    final negotiatedPayload =
-        (lastMtu != null && lastMtu! > 3) ? lastMtu! - 3 : 20;
+    // Fresh buffer for this attempt — never alias caller / builder memory.
+    final original = BleWritePayload.copyOf(bytes);
+    final maxPayload = BleWritePayload.maxPayloadForMtu(lastMtu);
     final declaredMax = config.commandCharacteristicMaxBytes;
-    final hardMax =
-        negotiatedPayload < declaredMax ? negotiatedPayload : declaredMax;
-    if (bytes.length > hardMax) {
-      throw StateError(
-        'Packet ${bytes.length} bytes exceeds write max ($hardMax) '
-        'mtu=${lastMtu ?? 'null'} declaredMax=$declaredMax — '
-        'GATT would fail; aborting before writeCharacteristic',
-      );
-    }
-    if (bytes.length > 100) {
-      BleLog.d(
-        'WARNING packet ${bytes.length}B > firmware Char1 declared 100B '
-        '(proceeding if MTU allows; watch for GATT 133)',
-      );
-    }
+    final attMax =
+        maxPayload < declaredMax ? maxPayload : declaredMax;
 
     final canWrite = c.properties.write;
     final canWriteNoResp = c.properties.writeWithoutResponse;
-    final useWithoutResponse = withoutResponse
+    // Prefer write-with-response for packet reliability (Android char value
+    // must not be overwritten before the stack copies it).
+    var useWithoutResponse = withoutResponse
         ? canWriteNoResp
         : (!canWrite && canWriteNoResp);
-
     if (!canWrite && !canWriteNoResp) {
       throw StateError('Characteristic ${c.uuid.str} is not writable');
     }
 
-    final job = _WriteJob(
-      bytes: bytes,
-      withoutResponse: useWithoutResponse,
-      characteristic: c,
-      role: target == BleWriteTarget.c1 ? 'C1' : 'C3',
-      completer: Completer<void>(),
+    final fitsSingleAtt = original.length <= attMax;
+    final useLongWrite = !fitsSingleAtt && canWrite && !useWithoutResponse;
+    if (!fitsSingleAtt && !useLongWrite) {
+      throw StateError(
+        'Packet ${original.length} bytes exceeds write max ($attMax) '
+        'mtu=${lastMtu ?? 'null'} and long-write unavailable '
+        '(need WRITE property, not WRITE_NO_RESP)',
+      );
+    }
+
+    // Logical write number for this transport connection.
+    final writeNo = ++_writeSequence;
+    final chunks = fitsSingleAtt
+        ? <Uint8List>[original]
+        : BleWritePayload.splitForAttPayload(
+            original,
+            maxPayload: attMax,
+          );
+
+    BleLog.d('── BLE WRITE #$writeNo PREFLIGHT ─────────────────');
+    BleLog.d('WRITE #$writeNo TOTAL PACKET LENGTH: ${original.length}');
+    BleLog.d('WRITE #$writeNo ORIGINAL HEX: ${BleWritePayload.hex(original)}');
+    BleLog.d(
+      'WRITE #$writeNo MTU=${lastMtu ?? 'null'} attMax=$attMax '
+      'singleAtt=$fitsSingleAtt longWrite=$useLongWrite '
+      'chunks=${chunks.length} withoutResponse=$useWithoutResponse',
     );
-    _writeQueue.addLast(job);
-    _pumpWriteQueue();
-    return job.completer.future;
+    for (var i = 0; i < chunks.length; i++) {
+      BleLog.d(
+        'WRITE #$writeNo chunk ${i + 1}/${chunks.length} '
+        'length: ${chunks[i].length} '
+        'HEX: ${BleWritePayload.hex(chunks[i])}',
+      );
+    }
+    final rebuilt = BleWritePayload.concatenate(chunks);
+    final match = rebuilt.length == original.length &&
+        BleWritePayload.hex(rebuilt) == BleWritePayload.hex(original);
+    BleLog.d(
+      'WRITE #$writeNo reconstructed==original: $match',
+    );
+    if (!match) {
+      throw StateError('WRITE #$writeNo chunk reconstruction failed before TX');
+    }
+
+    // When using FBP long-write, send the full original as one write call
+    // (FBP handles Prepare Write). App-level multi-chunk GATT writes are only
+    // used when each chunk already fits ATT (should be single for 32B+MTU≥35).
+    if (useLongWrite) {
+      final job = _WriteJob(
+        bytes: BleWritePayload.copyOf(original),
+        withoutResponse: false,
+        allowLongWrite: true,
+        characteristic: c,
+        role: target == BleWriteTarget.c1 ? 'C1' : 'C3',
+        writeNo: writeNo,
+        chunkIndex: 1,
+        chunkCount: 1,
+        originalHex: BleWritePayload.hex(original),
+        completer: Completer<void>(),
+      );
+      _writeQueue.addLast(job);
+      _pumpWriteQueue();
+      return job.completer.future;
+    }
+
+    // Serialize chunk completion: never enqueue the next chunk until the
+    // previous write has finished (required for ATT write reliability).
+    for (var i = 0; i < chunks.length; i++) {
+      final job = _WriteJob(
+        bytes: BleWritePayload.copyOf(chunks[i]),
+        withoutResponse: useWithoutResponse,
+        allowLongWrite: false,
+        characteristic: c,
+        role: target == BleWriteTarget.c1 ? 'C1' : 'C3',
+        writeNo: writeNo,
+        chunkIndex: i + 1,
+        chunkCount: chunks.length,
+        originalHex: BleWritePayload.hex(original),
+        completer: Completer<void>(),
+      );
+      _writeQueue.addLast(job);
+      _pumpWriteQueue();
+      await job.completer.future;
+    }
   }
 
   Future<void> _pumpWriteQueue() async {
@@ -952,18 +1049,36 @@ class FlutterBlueTransport implements BleTransport {
           'after CONNECT (must be << 5000ms firmware idle)',
         );
       }
+
+      // Fresh copy per attempt — Android/FBP must not see a shared buffer.
+      final wireBytes = BleWritePayload.copyOf(job.bytes);
+
+      BleLog.d(
+        'WRITE #${job.writeNo} IMMEDIATE TX '
+        'chunk ${job.chunkIndex}/${job.chunkCount} '
+        'attempt $attempt/$maxAttempts role=${job.role} '
+        'length: ${wireBytes.length} '
+        'HEX: ${BleWritePayload.hex(wireBytes)} '
+        'originalHEX: ${job.originalHex} '
+        'longWrite=${job.allowLongWrite} '
+        'withoutResponse=${job.withoutResponse}',
+      );
+      if (job.chunkCount == 1 &&
+          BleWritePayload.hex(wireBytes) != job.originalHex) {
+        BleLog.e(
+          'WRITE #${job.writeNo} HEX DRIFT before characteristic.write — '
+          'aborting (packet buffer mutated)',
+        );
+        throw StateError('Packet bytes changed before BLE write');
+      }
+
       _logWriteDiagnostics(
         c: c,
-        bytes: job.bytes,
+        bytes: wireBytes,
         role: job.role,
         withoutResponse: job.withoutResponse,
       );
-      BleLog.d(
-        'WRITE attempt $attempt/$maxAttempts role=${job.role} '
-        'len=${job.bytes.length} t=${pipelineTimer?.elapsedMs}ms',
-      );
 
-      // Java sleep(100) is between successive writes — skip before first AUTH.
       if (!isFirstAppWrite && config.writeSpacing > Duration.zero) {
         await Future<void>.delayed(config.writeSpacing);
       } else if (isFirstAppWrite) {
@@ -973,8 +1088,9 @@ class FlutterBlueTransport implements BleTransport {
       try {
         await c
             .write(
-              job.bytes,
+              List<int>.from(wireBytes),
               withoutResponse: job.withoutResponse,
+              allowLongWrite: job.allowLongWrite,
               timeout: config.writeTimeout.inSeconds.clamp(1, 60),
             )
             .timeout(
@@ -995,16 +1111,17 @@ class FlutterBlueTransport implements BleTransport {
           );
         }
         BleLog.d(
-          'WRITE SUCCESS role=${job.role} uuid=${c.uuid.str} '
-          'len=${job.bytes.length} t=${pipelineTimer?.elapsedMs}ms',
+          'WRITE #${job.writeNo} SUCCESS chunk ${job.chunkIndex}/'
+          '${job.chunkCount} len=${wireBytes.length} '
+          'HEX: ${BleWritePayload.hex(wireBytes)}',
         );
         return;
       } catch (e) {
         lastError = e;
         final is133 = _isGatt133(e);
         BleLog.e(
-          'WRITE FAILED role=${job.role} attempt=$attempt/$maxAttempts '
-          'gatt133=$is133 t=${pipelineTimer?.elapsedMs}ms',
+          'WRITE #${job.writeNo} FAILED chunk ${job.chunkIndex}/'
+          '${job.chunkCount} attempt=$attempt/$maxAttempts gatt133=$is133',
           e,
         );
         if (isFirstAppWrite) {
@@ -1080,14 +1197,24 @@ class _WriteJob {
   _WriteJob({
     required this.bytes,
     required this.withoutResponse,
+    required this.allowLongWrite,
     required this.characteristic,
     required this.role,
+    required this.writeNo,
+    required this.chunkIndex,
+    required this.chunkCount,
+    required this.originalHex,
     required this.completer,
   });
 
   final Uint8List bytes;
   final bool withoutResponse;
+  final bool allowLongWrite;
   final BluetoothCharacteristic characteristic;
   final String role;
+  final int writeNo;
+  final int chunkIndex;
+  final int chunkCount;
+  final String originalHex;
   final Completer<void> completer;
 }

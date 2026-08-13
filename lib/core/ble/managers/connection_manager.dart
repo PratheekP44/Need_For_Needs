@@ -47,10 +47,14 @@ class ConnectionManager {
 
   Future<void> ensurePermissions() => transport.ensurePermissions();
 
-  Future<List<BleDevice>> scan({Duration? timeout}) {
+  Future<List<BleDevice>> scan({
+    Duration? timeout,
+    bool stopOnTarget = false,
+  }) {
     return transport.startScan(
       timeout: timeout ?? config.scanTimeout,
       namePrefix: config.deviceNamePrefix,
+      stopOnTarget: stopOnTarget,
     );
   }
 
@@ -89,21 +93,27 @@ class ConnectionManager {
     await _maybeSettle(config.postConnectSettle, 'SETTLE_POST_CONNECT', timer);
 
     timer?.mark('MTU_REQUEST_START');
+    BleLog.d('[Phase31] MTU_START desired=${config.desiredMtu}');
     BleLog.d('PIPELINE step=RequestMTU desired=${config.desiredMtu}');
     final mtu = await transport.requestMtu(config.desiredMtu);
     timer?.mark('MTU_COMPLETE mtu=$mtu');
+    BleLog.d('[Phase31] MTU_COMPLETE mtu=$mtu');
     await _maybeSettle(config.postMtuSettle, 'SETTLE_POST_MTU', timer);
 
     timer?.mark('DISCOVER_START');
+    BleLog.d('[Phase31] DISCOVERY_START');
     BleLog.d('PIPELINE step=DiscoverServices');
     await transport.discoverServices();
     timer?.mark('SERVICES_DISCOVERED');
+    BleLog.d('[Phase31] DISCOVERY_COMPLETE');
     await _maybeSettle(config.postDiscoverSettle, 'SETTLE_POST_DISCOVER', timer);
 
     timer?.mark('NOTIFY_ENABLE_START');
+    BleLog.d('[Phase31] NOTIFICATION_SUBSCRIBE_START');
     BleLog.d('PIPELINE step=EnableNotifyC4');
     await transport.enableNotifications();
     timer?.mark('NOTIFY_ENABLED');
+    BleLog.d('[Phase31] NOTIFICATION_SUBSCRIBE');
     // CRITICAL: do not delay here — AUTH must follow immediately (Java parity).
     await _maybeSettle(config.postNotifySettle, 'SETTLE_POST_NOTIFY', timer);
 

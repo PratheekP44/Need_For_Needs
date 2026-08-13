@@ -27,9 +27,14 @@ abstract class BleTransport {
   Future<void> ensurePermissions();
   Future<BleAdapterState> adapterState();
 
+  /// Scan for nearby devices.
+  ///
+  /// When [stopOnTarget] is true, stop as soon as [BleDevice.isTargetLocker]
+  /// matches (exact configured name / service UUID) — do not wait for timeout.
   Future<List<BleDevice>> startScan({
     required Duration timeout,
     String? namePrefix,
+    bool stopOnTarget = false,
   });
 
   Future<void> stopScan();

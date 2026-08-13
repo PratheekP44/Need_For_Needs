@@ -10,6 +10,7 @@ import '../protocol/packet_types.dart';
 import '../protocol/parsed_ble_response.dart';
 import '../protocol/real_packet_builder.dart';
 import '../transport/ble_log.dart';
+import '../transport/collect_ble_profiler.dart';
 import '../transport/flutter_blue_transport.dart';
 
 /// Result of the proven Demo connect pipeline (scan → connect → MTU → GATT → notify).
@@ -19,12 +20,14 @@ class BleUnlockConnectResult {
     this.mtu,
     this.services = const [],
     this.notifyEnabled = false,
+    this.usedSessionCache = false,
   });
 
   final BleDevice device;
   final int? mtu;
   final List<GattServiceInfo> services;
   final bool notifyEnabled;
+  final bool usedSessionCache;
 }
 
 /// Shared BLE unlock engine used by production Collect.
@@ -50,6 +53,12 @@ class BleUnlockEngine {
 
   static const String defaultTargetName = 'LKRM-V2';
 
+  /// Session-only cache of the last successfully connected locker.
+  /// Identity remains advertised name (configurable); the remote id is only
+  /// reused within this app process for faster reconnect — never hardcoded.
+  BleDevice? _sessionDevice;
+  String _sessionTargetName = defaultTargetName;
+
   LockerService get locker => _locker;
 
   BleConnectionManager get connection => BleConnectionManager(
@@ -68,13 +77,24 @@ class BleUnlockEngine {
     return t is FlutterBlueTransport ? t : null;
   }
 
+  /// Clear session reconnect cache (tests / forced fresh scan).
+  void clearSessionCache() {
+    _sessionDevice = null;
+  }
+
   /// Scan nearby lockers (production Collect path).
-  Future<List<BleDevice>> scan({Duration? timeout}) async {
-    BleLog.d('[BleUnlockEngine] Scan');
+  ///
+  /// Phase 31: short ceiling ([BleConfig.scanTimeout], typically 5s) and
+  /// [stopOnTarget] so we cancel as soon as LKRM-V2 is seen.
+  Future<List<BleDevice>> scan({
+    Duration? timeout,
+    bool stopOnTarget = true,
+  }) async {
+    BleLog.d('[BleUnlockEngine] Scan stopOnTarget=$stopOnTarget');
     await connection.ensurePermissions();
-    final wait = timeout ?? const Duration(seconds: 25);
-    return _locker.scanForLockers().timeout(
-      wait,
+    final wait = timeout ?? _locker.config.scanTimeout;
+    return connection.scan(timeout: wait, stopOnTarget: stopOnTarget).timeout(
+      wait + const Duration(seconds: 2),
       onTimeout: () {
         throw TimeoutException('Device not found (scan timeout)');
       },
@@ -101,20 +121,111 @@ class BleUnlockEngine {
     return connection.selectLockerDevice(devices);
   }
 
+  bool _sessionMatches(String targetName) {
+    final cached = _sessionDevice;
+    if (cached == null) return false;
+    final needle = targetName.trim().toLowerCase();
+    if (needle.isEmpty) return false;
+    final name = cached.name.toLowerCase();
+    return name == needle ||
+        name.contains(needle) ||
+        _sessionTargetName.toLowerCase() == needle;
+  }
+
+  void _rememberSession(BleDevice device, String targetName) {
+    _sessionDevice = device;
+    _sessionTargetName = targetName;
+    BleLog.d(
+      '[Phase31] SESSION_CACHE remember name=${device.name} '
+      '(id retained for this app session only)',
+    );
+  }
+
+  BleUnlockConnectResult _connectResult(
+    BleDevice device, {
+    required bool usedSessionCache,
+  }) {
+    final fbp = _fbp;
+    final mtu = fbp?.lastMtu ?? _locker.currentConnection.mtu;
+    final services = fbp?.discoveredServices ?? const <GattServiceInfo>[];
+    final notifyOn = fbp?.pipelineNotifyEnabled ??
+        fbp?.linkState.notificationsEnabled ??
+        true;
+    return BleUnlockConnectResult(
+      device: device,
+      mtu: mtu,
+      services: services,
+      notifyEnabled: notifyOn,
+      usedSessionCache: usedSessionCache,
+    );
+  }
+
+  Future<void> _connectDevice(
+    BleDevice device, {
+    CollectBleProfiler? timing,
+  }) async {
+    timing?.mark('CONNECT_START');
+    BleLog.d('[Phase31] CONNECT_START name=${device.name}');
+    await connection.connect(device).timeout(
+      // Full pipeline = GATT connect + MTU + discover + notify.
+      // Per-attempt connect timeout stays at config.connectTimeout; this is
+      // only the outer Collect budget (retries + pipeline).
+      _locker.config.connectTimeout + const Duration(seconds: 12),
+      onTimeout: () {
+        throw TimeoutException('Unable to connect (timeout)');
+      },
+    );
+    timing?.mark('CONNECTED');
+    BleLog.d('[Phase31] CONNECTED');
+
+    // Pipeline already timed MTU / discovery / notify internally — dump it.
+    connection.inner.lastPipelineTimer?.report(
+      headline: 'Phase31 post-connect pipeline (MTU/DISCOVERY/NOTIFY)',
+    );
+  }
+
   /// Scan → Find device by name → Connect → MTU → Discover → Enable notifications.
   ///
-  /// Exact pipeline used by production Collect on real hardware.
+  /// Phase 31: try session reconnect first; else short scan with early stop.
   Future<BleUnlockConnectResult> connect({
     String targetDeviceName = defaultTargetName,
     void Function(String stage)? onStage,
+    CollectBleProfiler? timing,
   }) async {
-    onStage?.call('scan');
-    BleLog.d('[BleUnlockEngine] Scan');
-    final devices = await scan();
-
     final targetName = targetDeviceName.trim().isEmpty
         ? defaultTargetName
         : targetDeviceName.trim();
+
+    // ── Session reconnect (fallback to scan on any failure) ─────────────
+    if (_sessionMatches(targetName)) {
+      final cached = _sessionDevice!;
+      onStage?.call('connect');
+      BleLog.d(
+        '[Phase31] SESSION_RECONNECT attempt name=${cached.name}',
+      );
+      try {
+        await _connectDevice(cached, timing: timing);
+        _rememberSession(cached, targetName);
+        final result = _connectResult(cached, usedSessionCache: true);
+        _logConnected(result);
+        onStage?.call('connected');
+        return result;
+      } catch (e) {
+        BleLog.d('[Phase31] SESSION_RECONNECT failed — short scan fallback: $e');
+        await disconnect();
+        _sessionDevice = null;
+      }
+    }
+
+    onStage?.call('scan');
+    BleLog.d('[BleUnlockEngine] Scan');
+    timing?.mark('SCAN_START');
+    final devices = await scan(
+      timeout: _locker.config.scanTimeout,
+      stopOnTarget: true,
+    );
+    timing?.mark('SCAN_STOP');
+
     final device = findTarget(devices, targetName: targetName);
     if (device == null) {
       throw StateError(
@@ -125,16 +236,12 @@ class BleUnlockEngine {
     BleLog.d(
       '[BleUnlockEngine] Find $targetName → ${device.name} (${device.id})',
     );
+    BleLog.d('[Phase31] DEVICE_FOUND name=${device.name}');
 
     onStage?.call('connect');
     BleLog.d('[BleUnlockEngine] Connect');
     try {
-      await connection.connect(device).timeout(
-        _locker.config.connectTimeout + const Duration(seconds: 20),
-        onTimeout: () {
-          throw TimeoutException('Unable to connect (timeout)');
-        },
-      );
+      await _connectDevice(device, timing: timing);
     } on TimeoutException {
       await disconnect();
       rethrow;
@@ -143,17 +250,18 @@ class BleUnlockEngine {
       throw StateError('Unable to connect: $e');
     }
 
-    final fbp = _fbp;
-    final mtu = fbp?.lastMtu ?? _locker.currentConnection.mtu;
-    final services = fbp?.discoveredServices ?? const <GattServiceInfo>[];
-    final notifyOn = fbp?.pipelineNotifyEnabled ??
-        fbp?.linkState.notificationsEnabled ??
-        true;
+    _rememberSession(device, targetName);
+    final result = _connectResult(device, usedSessionCache: false);
+    _logConnected(result);
+    onStage?.call('connected');
+    return result;
+  }
 
+  void _logConnected(BleUnlockConnectResult result) {
     BleLog.d('[BleUnlockEngine] Connected');
-    BleLog.d('[BleUnlockEngine] MTU ${mtu ?? _locker.config.desiredMtu}');
-    BleLog.d('[BleUnlockEngine] Services ${services.length}');
-    for (final s in services) {
+    BleLog.d('[BleUnlockEngine] MTU ${result.mtu ?? _locker.config.desiredMtu}');
+    BleLog.d('[BleUnlockEngine] Services ${result.services.length}');
+    for (final s in result.services) {
       BleLog.d('[BleUnlockEngine]   Service ${s.uuid}');
       for (final c in s.characteristics) {
         BleLog.d(
@@ -162,15 +270,7 @@ class BleUnlockEngine {
       }
     }
     BleLog.d(
-      '[BleUnlockEngine] Notify enabled ${notifyOn ? 'YES' : '—'}',
-    );
-
-    onStage?.call('connected');
-    return BleUnlockConnectResult(
-      device: device,
-      mtu: mtu,
-      services: services,
-      notifyEnabled: notifyOn,
+      '[BleUnlockEngine] Notify enabled ${result.notifyEnabled ? 'YES' : '—'}',
     );
   }
 
@@ -194,25 +294,49 @@ class BleUnlockEngine {
   }
 
   /// Write characteristic → wait for notification → parse.
+  ///
+  /// Phase 30: arm the notification waiter *before* the GATT write.
+  /// [notificationStream] is broadcast (no buffer). With write-with-response,
+  /// firmware often NOTIFYs during the ATT round-trip — listening only after
+  /// write returns drops the ACK and Collect never reaches SUCCESS.
   Future<ParsedBleResponse> writeAndWait({
     required Uint8List packet,
     Duration? timeout,
+    CollectBleProfiler? timing,
   }) async {
     if (!isConnected) {
       throw StateError('Write failed — not connected');
     }
-    try {
-      await connection.writePacket(packet);
-      BleLog.d('[BleUnlockEngine] Write success');
-    } catch (e) {
-      BleLog.e('[BleUnlockEngine] Write failed', e);
-      throw StateError('Write failed: $e');
-    }
+    // Isolate from builder buffer — transport also copies again.
+    final wire = Uint8List.fromList(packet);
+    BleLog.d(
+      '[BleUnlockEngine] writeAndWait ORIGINAL length=${wire.length} '
+      'HEX=${_hex(wire)}',
+    );
 
     final wait =
         timeout ?? _timeouts.responseTimeout(BlePacketType.openBox);
+    // Same ordering as [BleProtocol._sendAndWait]: listen, then write.
+    final pending = connection.waitForNotification(timeout: wait);
+
     try {
-      final raw = await connection.waitForNotification(timeout: wait);
+      timing?.mark('WRITE_START');
+      BleLog.d('[Phase31] WRITE_START');
+      await connection.writePacket(wire);
+      timing?.mark('WRITE_COMPLETE');
+      BleLog.d('[Phase31] WRITE_COMPLETE');
+      BleLog.d('[BleUnlockEngine] Write success');
+    } catch (e) {
+      BleLog.e('[BleUnlockEngine] Write failed', e);
+      // Ignore the armed waiter so it does not leak unhandled errors.
+      unawaited(pending.then<void>((_) {}, onError: (_) {}));
+      throw StateError('Write failed: $e');
+    }
+
+    try {
+      final raw = await pending;
+      timing?.mark('RESPONSE_RECEIVED');
+      BleLog.d('[Phase31] RESPONSE_RECEIVED len=${raw.length}');
       BleLog.d(
         '[BleUnlockEngine] Notification HEX ${_hex(raw)}',
       );
@@ -256,6 +380,7 @@ class BleUnlockEngine {
     String targetDeviceName = defaultTargetName,
     void Function(String stage)? onStage,
   }) async {
+    final timing = CollectBleProfiler();
     _logUnlockRequest(request);
 
     ParsedBleResponse? openParsed;
@@ -265,6 +390,7 @@ class BleUnlockEngine {
       linked = await connect(
         targetDeviceName: targetDeviceName,
         onStage: onStage,
+        timing: timing,
       );
 
       onStage?.call('open');
@@ -273,7 +399,7 @@ class BleUnlockEngine {
         request: request,
       );
       BleLog.d('[BleUnlockEngine] Packet HEX ${_hex(packet)}');
-      openParsed = await writeAndWait(packet: packet);
+      openParsed = await writeAndWait(packet: packet, timing: timing);
 
       BleLog.d(
         '[BleUnlockEngine] Notification HEX=${openParsed.rawHex} '
@@ -286,6 +412,8 @@ class BleUnlockEngine {
         'kind=${openParsed.kind.name}',
       );
       if (!success) {
+        timing.mark('UNLOCK_FAIL');
+        timing.report(success: false, note: openParsed.message);
         await disconnect();
         return UnlockResult.fail(
           stage: 'open',
@@ -294,6 +422,12 @@ class BleUnlockEngine {
         );
       }
 
+      timing.mark('UNLOCK_SUCCESS');
+      BleLog.d('[Phase31] UNLOCK_SUCCESS');
+      timing.report(
+        success: true,
+        note: linked.usedSessionCache ? 'session_reconnect' : 'short_scan',
+      );
       onStage?.call('success');
       final result = UnlockResult.ok(
         stage: 'complete',
@@ -306,6 +440,8 @@ class BleUnlockEngine {
       await disconnect();
       return result;
     } on TimeoutException catch (e) {
+      timing.mark('UNLOCK_FAIL');
+      timing.report(success: false, note: e.message);
       await disconnect();
       final msg = e.message ?? e.toString();
       final stage = msg.toLowerCase().contains('scan')
@@ -323,6 +459,8 @@ class BleUnlockEngine {
         openResponse: openParsed,
       );
     } catch (e) {
+      timing.mark('UNLOCK_FAIL');
+      timing.report(success: false, note: e.toString());
       await disconnect();
       BleLog.e('[BleUnlockEngine] Unlock Result FAIL', e);
       return UnlockResult.fail(
@@ -335,7 +473,7 @@ class BleUnlockEngine {
   }
 
   static void _logUnlockRequest(UnlockPacketRequest request) {
-    BleLog.d('── BleUnlockEngine.unlockOpen (Phase 20) ───────');
+    BleLog.d('── BleUnlockEngine.unlockOpen (Phase 20/31) ───────');
     BleLog.d('Order ID: ${request.orderId}');
     BleLog.d('Locker ID: ${request.lockerId}');
     BleLog.d('Terminal: ${request.terminalNumber}');

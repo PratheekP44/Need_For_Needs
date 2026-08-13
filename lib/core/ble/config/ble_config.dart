@@ -149,14 +149,16 @@ class BleConfig {
         ),
         deviceNamePrefix: deviceNamePrefix,
         targetDeviceName: targetDeviceName,
-        scanTimeout: const Duration(seconds: 15),
+        // Phase 31: Collect stops early when LKRM-V2 is found; this is the
+        // hard ceiling only (was 15s floor in transport → ~30s Collect).
+        scanTimeout: const Duration(seconds: 5),
         useVirtualMcuTransport: false,
         useMockTransport: false,
         desiredMtu: 512,
         // Allow ATT MTU-sized command frames (declared Char1 len is 100;
         // negotiated MTU may permit larger writes on real silicon).
         commandCharacteristicMaxBytes: 512,
-        connectTimeout: const Duration(seconds: 10),
+        connectTimeout: const Duration(seconds: 8),
         connectRetryAttempts: 3,
         autoReconnect: true,
         postConnectSettle: Duration.zero,

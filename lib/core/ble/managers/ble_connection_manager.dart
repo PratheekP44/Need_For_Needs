@@ -33,9 +33,12 @@ class BleConnectionManager {
 
   Future<void> ensurePermissions() => _connection.ensurePermissions();
 
-  Future<List<BleDevice>> scan({Duration? timeout}) async {
-    BleLog.d('BleConnectionManager.scan');
-    return _connection.scan(timeout: timeout);
+  Future<List<BleDevice>> scan({
+    Duration? timeout,
+    bool stopOnTarget = false,
+  }) async {
+    BleLog.d('BleConnectionManager.scan stopOnTarget=$stopOnTarget');
+    return _connection.scan(timeout: timeout, stopOnTarget: stopOnTarget);
   }
 
   Future<void> stopScan() => _connection.stopScan();
@@ -95,11 +98,14 @@ class BleConnectionManager {
     if (!_connection.isConnected) {
       throw StateError('Write failed — not connected');
     }
+    // Fresh copy so builder / caller buffers cannot be mutated mid-TX.
+    final wire = Uint8List.fromList(bytes);
     BleLog.d(
-      'Packet Sent length=${bytes.length} HEX=${_hex(bytes)}',
+      'Packet Sent (pre-transport) length=${wire.length} '
+      'HEX=${_hex(wire)}',
     );
     try {
-      await _connection.write(bytes).timeout(
+      await _connection.write(wire).timeout(
         _config.writeTimeout,
         onTimeout: () {
           BleLog.e('Timeout — characteristic write');
@@ -108,7 +114,7 @@ class BleConnectionManager {
           );
         },
       );
-      BleLog.d('Write confirmation OK (${bytes.length} bytes)');
+      BleLog.d('Write confirmation OK (${wire.length} bytes)');
     } catch (e) {
       BleLog.e('Write failed', e);
       rethrow;
@@ -116,6 +122,9 @@ class BleConnectionManager {
   }
 
   /// Wait for the next notification (any), with timeout.
+  ///
+  /// Call this *before* [writePacket]. The underlying stream is broadcast and
+  /// does not buffer — events that arrive with no listener are dropped.
   Future<Uint8List> waitForNotification({Duration? timeout}) async {
     final wait = timeout ?? const Duration(seconds: 8);
     BleLog.d('Waiting for notification timeout=${wait.inSeconds}s');

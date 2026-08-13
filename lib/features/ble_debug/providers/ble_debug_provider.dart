@@ -213,8 +213,13 @@ class BleDebugController extends Notifier<BleDebugState> {
         );
         return;
       }
-      // Hard ceiling so the Scan button cannot stick forever.
-      final devices = await _locker.scanForLockers().timeout(
+      // Debug listing wants the full window; Collect uses stopOnTarget + 5s.
+      final devices = await _locker
+          .scanForLockers(
+            timeout: const Duration(seconds: 15),
+            stopOnTarget: false,
+          )
+          .timeout(
         const Duration(seconds: 25),
         onTimeout: () {
           throw TimeoutException(

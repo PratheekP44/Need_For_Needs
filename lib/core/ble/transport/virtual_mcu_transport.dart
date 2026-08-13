@@ -94,6 +94,7 @@ class VirtualMCUTransport implements BleTransport {
   Future<List<BleDevice>> startScan({
     required Duration timeout,
     String? namePrefix,
+    bool stopOnTarget = false,
   }) async {
     await adapterState();
     final prefix = namePrefix ?? _config.deviceNamePrefix;

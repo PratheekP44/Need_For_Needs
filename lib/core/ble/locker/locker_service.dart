@@ -106,11 +106,17 @@ class LockerService {
   Future<BleAdapterState> refreshAdapterState() => _transport.adapterState();
 
   /// Scan for nearby Campus Essentials lockers.
-  Future<List<BleDevice>> scanForLockers() async {
+  Future<List<BleDevice>> scanForLockers({
+    Duration? timeout,
+    bool stopOnTarget = false,
+  }) async {
     _setState(LockerState.scanning);
     try {
       await _connection.ensurePermissions();
-      final devices = await _connection.scan();
+      final devices = await _connection.scan(
+        timeout: timeout,
+        stopOnTarget: stopOnTarget,
+      );
       _nearby = devices;
       _nearbyController.add(devices);
       _setState(LockerState.disconnected);
