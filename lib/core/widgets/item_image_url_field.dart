@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
+import '../utils/product_image_url.dart';
 import 'product_image.dart';
 
 /// Admin Image URL field with live preview and non-blocking load errors.
@@ -52,25 +53,7 @@ class _ItemImageUrlFieldState extends State<ItemImageUrlField> {
   }
 
   void _validateSoft(String raw) {
-    final value = raw.trim();
-    if (value.isEmpty) {
-      _formatHint = null;
-      return;
-    }
-    if (_isAcceptableImageUrl(value)) {
-      _formatHint = null;
-      return;
-    }
-    _formatHint = 'Use an http(s) URL, e.g. https://example.com/image.jpg';
-  }
-
-  static bool _isAcceptableImageUrl(String value) {
-    if (value.startsWith('/')) return true; // server-relative uploads
-    final uri = Uri.tryParse(value);
-    if (uri == null) return false;
-    return uri.hasScheme &&
-        (uri.scheme == 'http' || uri.scheme == 'https') &&
-        uri.host.isNotEmpty;
+    _formatHint = ProductImageUrlRules.validationError(raw);
   }
 
   @override
@@ -89,7 +72,8 @@ class _ItemImageUrlFieldState extends State<ItemImageUrlField> {
           decoration: InputDecoration(
             labelText: 'Image URL',
             hintText: 'https://example.com/image.jpg',
-            helperText: _formatHint,
+            helperText: _formatHint ??
+                'Paste a permanent public https URL (stored in MongoDB).',
             helperMaxLines: 2,
             helperStyle: AppTextStyles.caption.copyWith(
               color: _formatHint == null
@@ -142,7 +126,6 @@ class _ItemImageUrlFieldState extends State<ItemImageUrlField> {
                       icon: Icons.broken_image_outlined,
                       iconSize: 40,
                     ),
-                    // Soft non-blocking note when format looks invalid.
                     if (_formatHint != null)
                       Positioned(
                         left: 8,
@@ -157,7 +140,7 @@ class _ItemImageUrlFieldState extends State<ItemImageUrlField> {
                               vertical: 6,
                             ),
                             child: Text(
-                              'URL may be invalid — preview may fail',
+                              _formatHint!,
                               style: AppTextStyles.caption.copyWith(
                                 color: AppColors.cream,
                               ),

@@ -1,5 +1,5 @@
 name: need_for_needs
-description: "Need For Needs — BLE-enabled smart locker system."
+description: "NeedForNeeds — BLE-enabled smart locker system."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -66,13 +66,13 @@ flutter_launcher_icons:
   android: true
   ios: false
   # Legacy / non-adaptive mipmaps (locker only — never title.png).
-  image_path: assets/images/locker.png
+  image_path: assets/images/branding/locker.png
   # Padded derivative for Android adaptive safe-zone (source locker.png unchanged).
   adaptive_icon_background: "#222831"
   adaptive_icon_foreground: android/branding/locker_adaptive_foreground.png
   web:
     generate: true
-    image_path: assets/images/locker.png
+    image_path: assets/images/branding/locker.png
     background_color: "#222831"
     theme_color: "#222831"
 
@@ -88,8 +88,8 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/images/locker.png
-    - assets/images/title.png
+    - assets/images/branding/locker.png
+    - assets/images/branding/title.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

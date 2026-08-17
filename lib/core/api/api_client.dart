@@ -54,12 +54,15 @@ class ApiClient {
     Map<String, String>? query,
     bool auth = true,
   }) {
+    final uri = _uri(path, query);
     return _send(
       () async => _http.get(
-        _uri(path, query),
+        uri,
         headers: await _headers(auth: auth),
       ),
       auth: auth,
+      method: 'GET',
+      uri: uri,
     );
   }
 
@@ -68,13 +71,16 @@ class ApiClient {
     Map<String, dynamic>? body,
     bool auth = true,
   }) {
+    final uri = _uri(path);
     return _send(
       () async => _http.post(
-        _uri(path),
+        uri,
         headers: await _headers(auth: auth),
         body: body == null ? null : jsonEncode(body),
       ),
       auth: auth,
+      method: 'POST',
+      uri: uri,
     );
   }
 
@@ -83,23 +89,29 @@ class ApiClient {
     Map<String, dynamic>? body,
     bool auth = true,
   }) {
+    final uri = _uri(path);
     return _send(
       () async => _http.put(
-        _uri(path),
+        uri,
         headers: await _headers(auth: auth),
         body: body == null ? null : jsonEncode(body),
       ),
       auth: auth,
+      method: 'PUT',
+      uri: uri,
     );
   }
 
   Future<dynamic> delete(String path, {bool auth = true}) {
+    final uri = _uri(path);
     return _send(
       () async => _http.delete(
-        _uri(path),
+        uri,
         headers: await _headers(auth: auth),
       ),
       auth: auth,
+      method: 'DELETE',
+      uri: uri,
     );
   }
 
@@ -110,9 +122,10 @@ class ApiClient {
     required List<http.MultipartFile> files,
     bool auth = true,
   }) {
+    final uri = _uri(path);
     return _send(
       () async {
-        final request = http.MultipartRequest('POST', _uri(path));
+        final request = http.MultipartRequest('POST', uri);
         final headers = await _headers(auth: auth);
         headers.remove('Content-Type');
         request.headers.addAll(headers);
@@ -124,24 +137,81 @@ class ApiClient {
         return http.Response.fromStream(streamed);
       },
       auth: auth,
+      method: 'POST_MULTIPART',
+      uri: uri,
     );
   }
 
   Future<dynamic> _send(
     Future<http.Response> Function() request, {
     required bool auth,
+    required String method,
+    required Uri uri,
   }) async {
-    final res = await request();
-    if (res.statusCode == 401 && auth) {
-      authLog('401 received — attempting token refresh');
-      final refreshed = await tryRefreshTokens();
-      if (refreshed) {
-        authLog('Token refresh OK — retrying request');
-        return _decode(await request());
+    try {
+      final res = await request();
+      _logHttp(method, uri, res);
+      if (res.statusCode == 401 && auth) {
+        authLog('401 received — attempting token refresh');
+        final refreshed = await tryRefreshTokens();
+        if (refreshed) {
+          authLog('Token refresh OK — retrying request');
+          final retry = await request();
+          _logHttp(method, uri, retry, note: 'retry_after_refresh');
+          return _decode(retry);
+        }
+        authLog('Token refresh failed');
       }
-      authLog('Token refresh failed');
+      return _decode(res);
+    } catch (e) {
+      // Temporary diagnose log — no tokens/secrets.
+      // ignore: avoid_print
+      print(
+        '[API] FAIL $method $uri '
+        'type=${e.runtimeType} message=$e '
+        'baseUrl=${config.apiBaseUrl}',
+      );
+      rethrow;
     }
-    return _decode(res);
+  }
+
+  static void _logHttp(
+    String method,
+    Uri uri,
+    http.Response res, {
+    String? note,
+  }) {
+    final bodyPreview = _safeBodyPreview(res.body);
+    // ignore: avoid_print
+    print(
+      '[API] $method $uri → ${res.statusCode}'
+      '${note != null ? ' ($note)' : ''}'
+      '${bodyPreview.isEmpty ? '' : ' body=$bodyPreview'}',
+    );
+  }
+
+  /// Truncated body for logs — strips obvious secret-looking fields.
+  static String _safeBodyPreview(String body) {
+    if (body.isEmpty) return '';
+    var text = body;
+    for (final key in [
+      'accessToken',
+      'refreshToken',
+      'token',
+      'password',
+      'secret',
+      'keyId',
+      'razorpay',
+    ]) {
+      text = text.replaceAllMapped(
+        RegExp('"$key"\\s*:\\s*"[^"]*"', caseSensitive: false),
+        (m) => '"$key":"***"',
+      );
+    }
+    if (text.length > 280) {
+      text = '${text.substring(0, 280)}…';
+    }
+    return text;
   }
 
   /// Exchange refresh token for a new access/refresh pair.

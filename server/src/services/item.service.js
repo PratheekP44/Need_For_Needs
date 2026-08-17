@@ -6,6 +6,11 @@ const activityService = require('./activity.service');
 const { getStorage } = require('../storage/storage');
 const AppError = require('../utils/AppError');
 const { parseListQuery, buildPagination } = require('../utils/query');
+const {
+  assertPublicImageUrl,
+  resolveStoredImageUrl,
+  toPersistentImageUrl,
+} = require('../utils/imageUrl');
 
 const ALLOWED_IMAGE_MIME = new Set([
   'image/jpeg',
@@ -13,6 +18,22 @@ const ALLOWED_IMAGE_MIME = new Set([
   'image/webp',
   'image/gif',
 ]);
+
+const UPDATABLE_FIELDS = [
+  'itemId',
+  'name',
+  'description',
+  'category',
+  'brand',
+  'barcode',
+  'imageUrl',
+  'sellingPrice',
+  'costPrice',
+  'gstPercentage',
+  'unit',
+  'isActive',
+  'tags',
+];
 
 function mimeFromFilename(name) {
   const lower = String(name || '').toLowerCase();
@@ -23,28 +44,52 @@ function mimeFromFilename(name) {
 }
 
 function formatItem(item) {
-  return typeof item.toPublicObject === 'function'
-    ? item.toPublicObject()
-    : {
-        id: item._id,
-        itemId: item.itemId,
-        name: item.name,
-        description: item.description,
-        category: item.category,
-        brand: item.brand,
-        barcode: item.barcode,
-        imageUrl: item.imageUrl,
-        sellingPrice: item.sellingPrice,
-        costPrice: item.costPrice,
-        gstPercentage: item.gstPercentage,
-        unit: item.unit,
-        isActive: item.isActive,
-        tags: item.tags,
-        createdBy: item.createdBy,
-        updatedBy: item.updatedBy,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-      };
+  if (typeof item.toPublicObject === 'function') {
+    return item.toPublicObject();
+  }
+  return {
+    id: item._id || item.id,
+    itemId: item.itemId,
+    name: item.name,
+    description: item.description,
+    category: item.category,
+    brand: item.brand,
+    barcode: item.barcode,
+    imageUrl: resolveStoredImageUrl(item.imageUrl),
+    sellingPrice: item.sellingPrice,
+    costPrice: item.costPrice,
+    gstPercentage: item.gstPercentage,
+    unit: item.unit,
+    isActive: item.isActive,
+    tags: item.tags,
+    createdBy: item.createdBy,
+    updatedBy: item.updatedBy,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+/**
+ * Build a safe partial update object.
+ * - Fields omitted from payload are not written (preserves Mongo values).
+ * - imageUrl present as '' explicitly clears the image.
+ * - imageUrl present as a URL replaces it.
+ */
+function buildItemUpdates(payload, adminId) {
+  const updates = { updatedBy: adminId || null };
+  for (const key of UPDATABLE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+    if (payload[key] === undefined) continue;
+    if (key === 'imageUrl') {
+      updates.imageUrl = assertPublicImageUrl(payload.imageUrl, {
+        allowEmpty: true,
+        allowRelativeUploads: true,
+      });
+      continue;
+    }
+    updates[key] = payload[key];
+  }
+  return updates;
 }
 
 class ItemService {
@@ -59,7 +104,18 @@ class ItemService {
       throw new AppError('Barcode already exists', 409);
     }
     if (Number(payload.sellingPrice) < Number(payload.costPrice)) {
-      throw new AppError('Selling price must be greater than or equal to cost price', 400);
+      throw new AppError(
+        'Selling price must be greater than or equal to cost price',
+        400,
+      );
+    }
+
+    let imageUrl = '';
+    if (Object.prototype.hasOwnProperty.call(payload, 'imageUrl')) {
+      imageUrl = assertPublicImageUrl(payload.imageUrl, {
+        allowEmpty: true,
+        allowRelativeUploads: true,
+      });
     }
 
     const item = await itemRepository.create({
@@ -69,7 +125,7 @@ class ItemService {
       category: payload.category,
       brand: payload.brand,
       barcode,
-      imageUrl: payload.imageUrl || '',
+      imageUrl,
       sellingPrice: payload.sellingPrice,
       costPrice: payload.costPrice,
       gstPercentage: payload.gstPercentage ?? 0,
@@ -110,7 +166,14 @@ class ItemService {
         isActive: 'isActive',
         itemId: 'itemId',
       },
-      searchFields: ['name', 'brand', 'barcode', 'itemId', 'description', 'category'],
+      searchFields: [
+        'name',
+        'brand',
+        'barcode',
+        'itemId',
+        'description',
+        'category',
+      ],
     });
 
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
@@ -132,7 +195,6 @@ class ItemService {
       listQuery.filter.itemId = String(listQuery.filter.itemId).toUpperCase();
     }
 
-    // Convenience aliases for sorting
     if (query.sort === 'newest') listQuery.sort = '-createdAt';
     if (query.sort === 'oldest') listQuery.sort = 'createdAt';
     if (query.sort === 'price') listQuery.sort = 'sellingPrice';
@@ -165,7 +227,7 @@ class ItemService {
       throw new AppError('Item not found', 404);
     }
 
-    const updates = { ...payload, updatedBy: adminId || null };
+    const updates = buildItemUpdates(payload, adminId);
 
     if (updates.itemId) {
       updates.itemId = String(updates.itemId).trim().toUpperCase();
@@ -188,11 +250,16 @@ class ItemService {
     }
 
     const nextSelling =
-      updates.sellingPrice !== undefined ? updates.sellingPrice : item.sellingPrice;
+      updates.sellingPrice !== undefined
+        ? updates.sellingPrice
+        : item.sellingPrice;
     const nextCost =
       updates.costPrice !== undefined ? updates.costPrice : item.costPrice;
     if (Number(nextSelling) < Number(nextCost)) {
-      throw new AppError('Selling price must be greater than or equal to cost price', 400);
+      throw new AppError(
+        'Selling price must be greater than or equal to cost price',
+        400,
+      );
     }
 
     const updated = await itemRepository.updateById(item._id, updates);
@@ -201,7 +268,13 @@ class ItemService {
       entity: 'Item',
       entityId: updated._id,
       adminId,
-      metadata: { itemId: updated.itemId },
+      metadata: {
+        itemId: updated.itemId,
+        imageUrlTouched: Object.prototype.hasOwnProperty.call(
+          payload,
+          'imageUrl',
+        ),
+      },
     });
 
     return formatItem(updated);
@@ -297,13 +370,15 @@ class ItemService {
       folder: 'items',
     });
 
+    const storedUrl = toPersistentImageUrl(saved.publicUrl) || saved.publicUrl;
+
     const previous = item.imageUrl;
     const updated = await itemRepository.updateById(item._id, {
-      imageUrl: saved.publicUrl,
+      imageUrl: storedUrl,
       updatedBy: adminId || null,
     });
 
-    if (previous && previous !== saved.publicUrl) {
+    if (previous && previous !== storedUrl && previous !== saved.publicUrl) {
       try {
         await storage.delete(previous);
       } catch (_) {
@@ -316,7 +391,7 @@ class ItemService {
       entity: 'Item',
       entityId: updated._id,
       adminId,
-      metadata: { itemId: updated.itemId, imageUrl: saved.publicUrl },
+      metadata: { itemId: updated.itemId, imageUrl: storedUrl },
     });
 
     return formatItem(updated);
@@ -356,3 +431,4 @@ class ItemService {
 
 module.exports = new ItemService();
 module.exports.formatItem = formatItem;
+module.exports.buildItemUpdates = buildItemUpdates;

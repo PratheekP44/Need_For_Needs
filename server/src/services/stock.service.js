@@ -733,7 +733,9 @@ class StockService {
         itemName: occupied
           ? itemDoc?.name || 'Item'
           : null,
-        imageUrl: occupied ? itemDoc?.imageUrl || '' : '',
+        imageUrl: occupied
+          ? (itemDoc ? formatItem(itemDoc).imageUrl : '') || ''
+          : '',
         price: occupied ? Number(itemDoc?.sellingPrice) || 0 : 0,
         locker: {
           id: locker._id,

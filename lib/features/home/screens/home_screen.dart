@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/data/models.dart';
 import '../../../core/providers/core_providers.dart';
@@ -113,9 +112,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final home = ref.watch(homeViewModelProvider);
     final auth = ref.watch(authSessionProvider);
     final columns = responsiveColumns(context);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final homeBrandIcon = (screenWidth * 0.135).clamp(48.0, 58.0);
+    final homeBrandTitle = (screenWidth * 0.09).clamp(34.0, 42.0);
     final firstName = (auth.user?.name ?? 'there').split(' ').first;
     final lockers = home.lockers;
     final categories = home.categories;
+
+    // Drop a selected category if inventory refresh removed it.
+    if (_selectedCategoryId != null &&
+        !categories.any(
+          (c) => c.id.toUpperCase() == _selectedCategoryId!.toUpperCase(),
+        )) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _selectedCategoryId = null);
+      });
+    }
+
     final filtered = _filterProducts(home.products);
     final searching = _query.trim().isNotEmpty || _selectedCategoryId != null;
     final popular =
@@ -125,6 +138,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         : _filterProducts(home.recent.isNotEmpty ? home.recent : home.newest);
     final recentTitle =
         home.recent.isNotEmpty ? 'Buy again' : 'Recently added';
+    final noAvailableItems =
+        home.products.where((p) => p.isAvailable).isEmpty && !searching;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -146,12 +161,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const AppBrand.full(
-                                  iconHeight: 40,
-                                  titleHeight: 28,
-                                  alignment: MainAxisAlignment.start,
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: AppBrand.full(
+                                    iconHeight: homeBrandIcon,
+                                    titleHeight: homeBrandTitle,
+                                    spacing: 12,
+                                    alignment: MainAxisAlignment.start,
+                                  ),
                                 ),
-                                const SizedBox(height: 16),
+                                const SizedBox(height: 14),
                                 Text(
                                   '${_greeting()}, $firstName',
                                   style: AppTextStyles.caption,
@@ -166,15 +185,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                       : () => _openFilters(categories),
                                 ),
                                 const SizedBox(height: 20),
-                                SectionHeader(
-                                  title: 'Nearby locker',
-                                  actionLabel: 'See all',
-                                  onAction: lockers.isEmpty
-                                      ? null
-                                      : () => context.push(
-                                            '/locker/${lockers.first.id}',
-                                          ),
-                                ),
+                                const SectionHeader(title: 'Nearby locker'),
                                 const SizedBox(height: 10),
                                 if (lockers.isNotEmpty)
                                   LockerCard(locker: lockers.first)
@@ -187,184 +198,196 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                       ),
                                     ),
                                   ),
-                                const SizedBox(height: 24),
-                                const SectionHeader(title: 'Categories'),
-                                const SizedBox(height: 10),
+                                if (!noAvailableItems) ...[
+                                  const SizedBox(height: 24),
+                                  const SectionHeader(title: 'Categories'),
+                                  const SizedBox(height: 10),
+                                ],
                               ],
                             ),
                           ),
                         ),
                       ),
-                      SliverToBoxAdapter(
-                        child: SizedBox(
-                          height: 92,
-                          child: categories.isEmpty
-                              ? Center(
-                                  child: Text(
-                                    'No categories yet',
-                                    style: AppTextStyles.caption,
-                                  ),
-                                )
-                              : ListView.separated(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                  ),
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: categories.length,
-                                  separatorBuilder: (_, _) =>
-                                      const SizedBox(width: 10),
-                                  itemBuilder: (context, index) {
-                                    final category = categories[index];
-                                    final selected =
-                                        _selectedCategoryId == category.id;
-                                    return Material(
-                                      color: selected
-                                          ? AppColors.chip
-                                          : AppColors.surface,
-                                      borderRadius: BorderRadius.circular(16),
-                                      child: InkWell(
+                      if (!noAvailableItems)
+                        SliverToBoxAdapter(
+                          child: SizedBox(
+                            height: 100,
+                            child: categories.isEmpty
+                                ? Center(
+                                    child: Text(
+                                      'No categories with available items',
+                                      style: AppTextStyles.caption,
+                                    ),
+                                  )
+                                : ListView.separated(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                    ),
+                                    scrollDirection: Axis.horizontal,
+                                    itemCount: categories.length,
+                                    separatorBuilder: (_, _) =>
+                                        const SizedBox(width: 10),
+                                    itemBuilder: (context, index) {
+                                      final category = categories[index];
+                                      final selected =
+                                          _selectedCategoryId == category.id;
+                                      return Material(
+                                        color: selected
+                                            ? AppColors.chip
+                                            : AppColors.surface,
                                         borderRadius: BorderRadius.circular(16),
-                                        onTap: () {
-                                          setState(() {
-                                            _selectedCategoryId = selected
-                                                ? null
-                                                : category.id;
-                                          });
-                                        },
-                                        child: Ink(
-                                          width: 88,
-                                          decoration: BoxDecoration(
-                                            borderRadius:
-                                                BorderRadius.circular(16),
-                                            border: Border.all(
-                                              color: selected
-                                                  ? AppColors.primary
-                                                  : AppColors.border,
+                                        child: InkWell(
+                                          borderRadius:
+                                              BorderRadius.circular(16),
+                                          onTap: () {
+                                            setState(() {
+                                              _selectedCategoryId = selected
+                                                  ? null
+                                                  : category.id;
+                                            });
+                                          },
+                                          child: Ink(
+                                            width: 88,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 8,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                              border: Border.all(
+                                                color: selected
+                                                    ? AppColors.primary
+                                                    : AppColors.border,
+                                              ),
+                                            ),
+                                            child: Column(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                Icon(
+                                                  _categoryIcon(category.icon),
+                                                  size: 22,
+                                                  color: AppColors.primary,
+                                                ),
+                                                const SizedBox(height: 6),
+                                                Text(
+                                                  category.name,
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  textAlign: TextAlign.center,
+                                                  style: AppTextStyles.caption,
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                          child: Column(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              Icon(
-                                                _categoryIcon(category.icon),
-                                                color: AppColors.primary,
-                                              ),
-                                              const SizedBox(height: 8),
-                                              Text(
-                                                category.name,
-                                                style: AppTextStyles.caption,
-                                              ),
-                                            ],
-                                          ),
                                         ),
-                                      ),
-                                    );
-                                  },
-                                ),
+                                      );
+                                    },
+                                  ),
+                          ),
                         ),
-                      ),
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
                           child: SectionHeader(
-                            title: _selectedCategoryId == null && _query.isEmpty
-                                ? 'Popular items'
-                                : 'Results',
-                            actionLabel: 'Browse',
-                            onAction: lockers.isEmpty
-                                ? null
-                                : () => context.push(
-                                      '/locker/${lockers.first.id}',
-                                    ),
+                            title: noAvailableItems
+                                ? 'Items'
+                                : (_selectedCategoryId == null &&
+                                        _query.isEmpty
+                                    ? 'Popular items'
+                                    : 'Results'),
                           ),
                         ),
                       ),
-                      SliverToBoxAdapter(
-                        child: SizedBox(
-                          height: 250,
-                          child: popular.isEmpty
-                              ? EmptyState(
-                                  message: _query.isNotEmpty ||
-                                          _selectedCategoryId != null
-                                      ? 'No items match your search'
-                                      : 'No products available',
-                                  icon: Icons.search_off_rounded,
-                                )
-                              : ListView.separated(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                  ),
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: popular.length,
-                                  separatorBuilder: (_, _) =>
-                                      const SizedBox(width: 12),
-                                  itemBuilder: (context, index) {
-                                    final product = popular[index];
-                                    return ProductCard(
-                                      product: product,
-                                      onTap: () => context.push(
-                                        '/product/${product.id}',
-                                      ),
-                                      onAddToCart: () => _addToCart(
-                                        context,
-                                        ref,
-                                        product,
-                                      ),
-                                    );
-                                  },
-                                ),
-                        ),
-                      ),
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
-                          child: Text(
-                            recentTitle,
-                            style: AppTextStyles.title,
-                          ),
-                        ),
-                      ),
-                      if (recent.isEmpty)
+                      if (noAvailableItems)
                         const SliverToBoxAdapter(
                           child: Padding(
                             padding: EdgeInsets.fromLTRB(20, 0, 20, 100),
                             child: EmptyState(
-                              message: 'No recent purchases yet',
-                              icon: Icons.history_rounded,
+                              message: 'No products available',
+                              icon: Icons.inventory_2_outlined,
                             ),
                           ),
                         )
                       else
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                          sliver: SliverGrid(
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: columns,
-                              mainAxisSpacing: 12,
-                              crossAxisSpacing: 12,
-                              childAspectRatio: 0.72,
-                            ),
-                            delegate: SliverChildBuilderDelegate(
-                              (context, index) {
-                                final product = recent[index];
-                                return ProductCard(
-                                  width: double.infinity,
-                                  product: product,
-                                  onTap: () =>
-                                      context.push('/product/${product.id}'),
-                                  onAddToCart: () => _addToCart(
-                                    context,
-                                    ref,
-                                    product,
+                        SliverToBoxAdapter(
+                          child: SizedBox(
+                            height: 260,
+                            child: popular.isEmpty
+                                ? EmptyState(
+                                    message: _query.isNotEmpty ||
+                                            _selectedCategoryId != null
+                                        ? 'No items match your search'
+                                        : 'No products available',
+                                    icon: Icons.search_off_rounded,
+                                  )
+                                : ListView.separated(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                    ),
+                                    scrollDirection: Axis.horizontal,
+                                    itemCount: popular.length,
+                                    separatorBuilder: (_, _) =>
+                                        const SizedBox(width: 12),
+                                    itemBuilder: (context, index) {
+                                      final product = popular[index];
+                                      return ProductCard(
+                                        product: product,
+                                        onAddToCart: () =>
+                                            _addToCart(context, ref, product),
+                                      );
+                                    },
                                   ),
-                                );
-                              },
-                              childCount: recent.length,
+                          ),
+                        ),
+                      if (!noAvailableItems) ...[
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
+                            child: Text(
+                              recentTitle,
+                              style: AppTextStyles.title,
                             ),
                           ),
                         ),
+                        if (recent.isEmpty)
+                          const SliverToBoxAdapter(
+                            child: Padding(
+                              padding: EdgeInsets.fromLTRB(20, 0, 20, 100),
+                              child: EmptyState(
+                                message: 'No recent purchases yet',
+                                icon: Icons.history_rounded,
+                              ),
+                            ),
+                          )
+                        else
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                            sliver: SliverGrid(
+                              gridDelegate:
+                                  SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: columns,
+                                mainAxisSpacing: 12,
+                                crossAxisSpacing: 12,
+                                childAspectRatio: 0.68,
+                              ),
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) {
+                                  final product = recent[index];
+                                  return ProductCard(
+                                    width: double.infinity,
+                                    product: product,
+                                    onAddToCart: () =>
+                                        _addToCart(context, ref, product),
+                                  );
+                                },
+                                childCount: recent.length,
+                              ),
+                            ),
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -393,12 +416,14 @@ Future<void> _addToCart(
 ) async {
   try {
     await ref.read(cartViewModelProvider.notifier).addStock(product);
+    // Button shows brief "Added"; snackbar kept as secondary confirmation.
     if (context.mounted) {
       showAppSnackBar(context, 'Added to cart');
     }
   } catch (e) {
     if (context.mounted) {
       showAppSnackBar(context, userFacingError(e));
+      rethrow;
     }
   }
 }

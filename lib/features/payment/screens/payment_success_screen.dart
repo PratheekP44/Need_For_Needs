@@ -61,74 +61,87 @@ class _PaymentSuccessScreenState extends ConsumerState<PaymentSuccessScreen>
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              const Spacer(),
-              ScaleTransition(
-                scale: _scale,
-                child: Container(
-                  height: 120,
-                  width: 120,
-                  decoration: const BoxDecoration(
-                    color: AppColors.chip,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.check_rounded,
-                    size: 64,
-                    color: AppColors.success,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints:
+                      BoxConstraints(minHeight: constraints.maxHeight),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      children: [
+                        const Spacer(),
+                        ScaleTransition(
+                          scale: _scale,
+                          child: Container(
+                            height: 120,
+                            width: 120,
+                            decoration: const BoxDecoration(
+                              color: AppColors.chip,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.check_rounded,
+                              size: 64,
+                              color: AppColors.success,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        Text(
+                          'Ready to collect',
+                          style: AppTextStyles.headline,
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Reserved at $lockerName',
+                          style: AppTextStyles.body
+                              .copyWith(color: AppColors.muted),
+                          textAlign: TextAlign.center,
+                        ),
+                        if (payment != null) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            shortOrderLabel(payment.orderNumber),
+                            style: AppTextStyles.caption,
+                            textAlign: TextAlign.center,
+                          ),
+                          if (payment.boxes.isNotEmpty)
+                            Text(
+                              'Box ${payment.boxes.join(', ')}',
+                              style: AppTextStyles.caption,
+                              textAlign: TextAlign.center,
+                            ),
+                        ],
+                        const Spacer(),
+                        PrimaryButton(
+                          label: 'Collect',
+                          icon: Icons.lock_open_rounded,
+                          onPressed: () {
+                            final id = payment?.orderId.isNotEmpty == true
+                                ? payment!.orderId
+                                : payment?.orderNumber;
+                            if (id != null && id.isNotEmpty) {
+                              context.push(
+                                '/collect-item?orderId=${Uri.encodeComponent(id)}',
+                              );
+                            } else {
+                              context.push('/collect-item');
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        SecondaryButton(
+                          label: 'Home',
+                          onPressed: () => context.go('/home'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 28),
-              Text(
-                'Ready to collect',
-                style: AppTextStyles.headline,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Reserved at $lockerName',
-                style: AppTextStyles.body.copyWith(color: AppColors.muted),
-                textAlign: TextAlign.center,
-              ),
-              if (payment != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  shortOrderLabel(payment.orderNumber),
-                  style: AppTextStyles.caption,
-                  textAlign: TextAlign.center,
-                ),
-                if (payment.boxes.isNotEmpty)
-                  Text(
-                    'Box ${payment.boxes.join(', ')}',
-                    style: AppTextStyles.caption,
-                    textAlign: TextAlign.center,
-                  ),
-              ],
-              const Spacer(),
-              PrimaryButton(
-                label: 'Collect',
-                icon: Icons.lock_open_rounded,
-                onPressed: () {
-                  final id = payment?.orderId.isNotEmpty == true
-                      ? payment!.orderId
-                      : payment?.orderNumber;
-                  if (id != null && id.isNotEmpty) {
-                    context.push(
-                      '/collect-item?orderId=${Uri.encodeComponent(id)}',
-                    );
-                  } else {
-                    context.push('/collect-item');
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-              SecondaryButton(
-                label: 'Home',
-                onPressed: () => context.go('/home'),
-              ),
-            ],
+              );
+            },
           ),
         ),
       ),

@@ -95,13 +95,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // Responsive locker + larger title (no hardcoded phone size).
                   AppBrand.stacked(
-                    iconHeight: 96,
-                    titleHeight: 30,
-                    spacing: 20,
+                    spacing: 22,
                     onLongPress: _onLogoLongPress,
                   ),
-                  const SizedBox(height: 36),
+                  const SizedBox(height: 32),
                   const LockerInitIndicator(),
                   if (_logoPresses > 0 && _logoPresses < 5) ...[
                     const SizedBox(height: 24),
@@ -175,75 +174,99 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    // Noticeably larger than prior 56/34, still below splash stacked scale.
+    final brandIcon = (width * 0.175).clamp(64.0, 80.0);
+    final brandTitle = (width * 0.11).clamp(42.0, 52.0);
+
     return Scaffold(
       body: SafeArea(
         child: ResponsiveCenter(
           padding: const EdgeInsets.all(24),
           child: FadeSlideIn(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 12),
-                const Center(
-                  child: AppBrand.full(iconHeight: 56, titleHeight: 34),
-                ),
-                const SizedBox(height: 28),
-                Text(
-                  'Welcome back',
-                  style: AppTextStyles.display.copyWith(fontSize: 28),
-                ),
-                const SizedBox(height: 36),
-                TextField(
-                  controller: _email,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: Icon(Icons.mail_outline_rounded),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _password,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Password',
-                    prefixIcon: Icon(Icons.lock_outline_rounded),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () => showAppSnackBar(
-                      context,
-                      'Dev reset: run npm run seed:admin in the server folder',
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight,
                     ),
-                    child: const Text('Forgot password?'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                PrimaryButton(
-                  label: _busy ? 'Signing in…' : 'Sign In',
-                  onPressed: _busy ? null : _signIn,
-                ),
-                const SizedBox(height: 12),
-                SecondaryButton(
-                  label: 'Create Account',
-                  onPressed: () => context.push('/signup'),
-                ),
-                const Spacer(),
-                Center(
-                  child: TextButton(
-                    onPressed: () => context.push('/admin/login'),
-                    child: Text(
-                      'Admin access',
-                      style: AppTextStyles.caption.copyWith(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w700,
+                    child: IntrinsicHeight(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 8),
+                          Center(
+                            child: AppBrand.full(
+                              iconHeight: brandIcon,
+                              titleHeight: brandTitle,
+                              spacing: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'Welcome back',
+                            style: AppTextStyles.display.copyWith(fontSize: 28),
+                          ),
+                          const SizedBox(height: 36),
+                          TextField(
+                            controller: _email,
+                            keyboardType: TextInputType.emailAddress,
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                              prefixIcon: Icon(Icons.mail_outline_rounded),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          TextField(
+                            controller: _password,
+                            obscureText: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Password',
+                              prefixIcon: Icon(Icons.lock_outline_rounded),
+                            ),
+                          ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () => showAppSnackBar(
+                                context,
+                                'Dev reset: run npm run seed:admin in the server folder',
+                              ),
+                              child: const Text('Forgot password?'),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          PrimaryButton(
+                            label: _busy ? 'Signing in…' : 'Sign In',
+                            onPressed: _busy ? null : _signIn,
+                          ),
+                          const SizedBox(height: 12),
+                          SecondaryButton(
+                            label: 'Create Account',
+                            onPressed: () => context.push('/signup'),
+                          ),
+                          const Spacer(),
+                          Center(
+                            child: TextButton(
+                              onPressed: () => context.push('/admin/login'),
+                              child: Text(
+                                'Admin access',
+                                style: AppTextStyles.caption.copyWith(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                ),
-              ],
+                );
+              },
             ),
           ),
         ),
@@ -327,16 +350,24 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final brandIcon = (width * 0.175).clamp(64.0, 80.0);
+    final brandTitle = (width * 0.11).clamp(42.0, 52.0);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Create account')),
       body: ResponsiveCenter(
         padding: const EdgeInsets.all(24),
         child: ListView(
           children: [
-            const Center(
-              child: AppBrand.full(iconHeight: 52, titleHeight: 32),
+            Center(
+              child: AppBrand.full(
+                iconHeight: brandIcon,
+                titleHeight: brandTitle,
+                spacing: 14,
+              ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
             Text('Create account', style: AppTextStyles.headline),
             const SizedBox(height: 28),
             TextField(
@@ -409,49 +440,63 @@ class LocationPermissionScreen extends ConsumerWidget {
       body: SafeArea(
         child: ResponsiveCenter(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.all(28),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceMuted,
-                  shape: BoxShape.circle,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      children: [
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.all(28),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceMuted,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.near_me_rounded,
+                            size: 64,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        Text(
+                          'Find nearby lockers',
+                          style: AppTextStyles.headline,
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Location helps show lockers near you.',
+                          style: AppTextStyles.body
+                              .copyWith(color: AppColors.muted),
+                          textAlign: TextAlign.center,
+                        ),
+                        const Spacer(),
+                        PrimaryButton(
+                          label: 'Enable Location',
+                          icon: Icons.location_on_outlined,
+                          onPressed: () async {
+                            await ref
+                                .read(locationServiceProvider)
+                                .ensurePermission();
+                            if (context.mounted) context.go('/home');
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        SecondaryButton(
+                          label: 'Skip for now',
+                          onPressed: () => context.go('/home'),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ),
+                  ),
                 ),
-                child: const Icon(
-                  Icons.near_me_rounded,
-                  size: 64,
-                  color: AppColors.primary,
-                ),
-              ),
-              const SizedBox(height: 28),
-              Text(
-                'Find nearby lockers',
-                style: AppTextStyles.headline,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Location helps show lockers near you.',
-                style: AppTextStyles.body.copyWith(color: AppColors.muted),
-                textAlign: TextAlign.center,
-              ),
-              const Spacer(),
-              PrimaryButton(
-                label: 'Enable Location',
-                icon: Icons.location_on_outlined,
-                onPressed: () async {
-                  await ref.read(locationServiceProvider).ensurePermission();
-                  if (context.mounted) context.go('/home');
-                },
-              ),
-              const SizedBox(height: 12),
-              SecondaryButton(
-                label: 'Skip for now',
-                onPressed: () => context.go('/home'),
-              ),
-              const SizedBox(height: 12),
-            ],
+              );
+            },
           ),
         ),
       ),

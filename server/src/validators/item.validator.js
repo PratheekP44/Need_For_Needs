@@ -2,11 +2,15 @@
 
 const { body, param, query } = require('express-validator');
 const { ITEM_CATEGORIES, ITEM_UNITS } = require('../models/enums');
+const { assertPublicImageUrl } = require('../utils/imageUrl');
 
 /**
- * imageUrl: optional. Empty/null OK.
- * Absolute http(s) URLs OK.
- * Relative /uploads/... paths OK (legacy local uploads).
+ * imageUrl: optional on create/update.
+ * - omitted / null / '' → allowed (empty means no image on create; on update
+ *   empty means clear when the field is present in the body)
+ * - absolute public http(s) URLs OK
+ * - relative /uploads/... OK (legacy server uploads)
+ * - localhost / private LAN / file:// rejected
  */
 function optionalImageUrl() {
   return body('imageUrl')
@@ -17,31 +21,10 @@ function optionalImageUrl() {
       return value.trim();
     })
     .custom((value) => {
-      if (value === undefined || value === null || value === '') {
-        return true;
-      }
-      if (typeof value !== 'string') {
-        throw new Error('imageUrl must be a string');
-      }
-      if (value.length > 1000) {
-        throw new Error('Image URL cannot exceed 1000 characters');
-      }
-      // Preserve server-relative upload paths from multipart image upload.
-      if (value.startsWith('/uploads/')) {
-        return true;
-      }
-      let parsed;
-      try {
-        parsed = new URL(value);
-      } catch {
-        throw new Error('imageUrl must be a valid HTTP/HTTPS URL');
-      }
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        throw new Error('imageUrl must be a valid HTTP/HTTPS URL');
-      }
-      if (!parsed.hostname) {
-        throw new Error('imageUrl must be a valid HTTP/HTTPS URL');
-      }
+      assertPublicImageUrl(value, {
+        allowEmpty: true,
+        allowRelativeUploads: true,
+      });
       return true;
     });
 }

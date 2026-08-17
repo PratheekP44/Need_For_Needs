@@ -38,7 +38,8 @@ class CollectUnlockInfo {
   /// Primary box for UI (first assigned).
   int get boxNumber => boxNumbers.isNotEmpty ? boxNumbers.first : 0;
 
-  /// Build [UnlockPacketRequest] for [BleUnlockEngine] / [RealPacketBuilder].
+  /// Build [UnlockPacketRequest] for Collect → [BleUnlockEngine] /
+  /// [FinalUnlockPacketBuilder] (boxes → Port bitmap).
   UnlockPacketRequest toUnlockPacketRequest() {
     if (boxNumbers.isEmpty) {
       throw StateError('boxNumbers must not be empty');

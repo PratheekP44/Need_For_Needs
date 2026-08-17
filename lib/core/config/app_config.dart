@@ -4,6 +4,6 @@
 class AppConfig {
   const AppConfig._();
 
-  static const String appName = 'Need For Needs';
+  static const String appName = 'NeedForNeeds';
   static const String packageName = 'com.needforneeds';
 }

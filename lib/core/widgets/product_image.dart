@@ -5,11 +5,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/core_providers.dart';
 import '../theme/app_colors.dart';
 import '../utils/media_url.dart';
+import '../utils/product_image_url.dart';
 import 'image_placeholder.dart';
 
 export '../utils/media_url.dart' show resolveMediaUrl;
 
 /// Product thumbnail with disk/memory cache; falls back to placeholder.
+///
+/// Cache is performance-only. Source of truth is the network [imageUrl]
+/// from MongoDB / the API.
 class ProductImage extends ConsumerWidget {
   const ProductImage({
     super.key,
@@ -66,7 +70,8 @@ class ProductImage extends ConsumerWidget {
             ),
           ),
         ),
-        errorWidget: (_, _, _) {
+        errorWidget: (_, failedUrl, error) {
+          ProductImageUrlRules.debugLogLoadFailure(failedUrl, error);
           final compact = (height ?? 0) > 0 && (height ?? 0) < 72;
           return Container(
             height: height,

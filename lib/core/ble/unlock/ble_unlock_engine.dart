@@ -5,6 +5,7 @@ import '../locker/locker_service.dart';
 import '../managers/ble_connection_manager.dart';
 import '../managers/timeout_manager.dart';
 import '../models/ble_device.dart';
+import '../protocol/final_unlock_packet_builder.dart';
 import '../protocol/packet_parser.dart';
 import '../protocol/packet_types.dart';
 import '../protocol/parsed_ble_response.dart';
@@ -32,22 +33,24 @@ class BleUnlockConnectResult {
 
 /// Shared BLE unlock engine used by production Collect.
 ///
-/// This is the single reference implementation proven on real LKRM-V2 hardware.
-/// It reuses [ConnectionManager] / [BleTransport] / [RealPacketBuilder] /
-/// [PacketParser] — it does not reimplement them.
+/// Collect OPEN uses [FinalUnlockPacketBuilder] (Phase 32).
+/// [RealPacketBuilder] remains for Demo / legacy [buildPacket].
 class BleUnlockEngine {
   BleUnlockEngine({
     required LockerService locker,
     RealPacketBuilder? packetBuilder,
+    FinalUnlockPacketBuilder? finalPacketBuilder,
     PacketParser? packetParser,
     TimeoutManager? timeouts,
   })  : _locker = locker,
         _builder = packetBuilder ?? const RealPacketBuilder(),
+        _finalBuilder = finalPacketBuilder ?? FinalUnlockPacketBuilder(),
         _parser = packetParser ?? PacketParser(),
         _timeouts = timeouts ?? const TimeoutManager();
 
   final LockerService _locker;
   final RealPacketBuilder _builder;
+  final FinalUnlockPacketBuilder _finalBuilder;
   final PacketParser _parser;
   final TimeoutManager _timeouts;
 
@@ -67,6 +70,7 @@ class BleUnlockEngine {
       );
 
   RealPacketBuilder get packetBuilder => _builder;
+  FinalUnlockPacketBuilder get finalPacketBuilder => _finalBuilder;
   PacketParser get packetParser => _parser;
 
   bool get isConnected =>
@@ -274,7 +278,7 @@ class BleUnlockEngine {
     );
   }
 
-  /// Build fixed 32-byte firmware packet via [RealPacketBuilder].
+  /// Legacy / Demo: fixed Phase-20 packet via [RealPacketBuilder].
   Uint8List buildPacket({
     required int command,
     required UnlockPacketRequest request,
@@ -290,6 +294,24 @@ class BleUnlockEngine {
         '0x${packet[i].toRadixString(16).padLeft(2, '0')} (${packet[i]})',
       );
     }
+    return packet;
+  }
+
+  /// Production Collect: FINAL 32-byte packet (Command 0x01 + order Port).
+  ///
+  /// Boxes come only from [request.effectiveBoxNumbers] (current order).
+  Uint8List buildCollectPacket(UnlockPacketRequest request) {
+    final boxes = request.effectiveBoxNumbers;
+    final packet = _finalBuilder.buildCollect(
+      boxNumbers: boxes,
+      orderId: request.orderId,
+    );
+    assert(packet.length == FinalUnlockPacketBuilder.packetLength);
+    assert(packet[0] == FirmwareCommand.open);
+    BleLog.d(
+      '[BleUnlockEngine] COLLECT FINAL packet len=${packet.length} '
+      'boxes=$boxes HEX=${_hex(packet)}',
+    );
     return packet;
   }
 
@@ -347,7 +369,7 @@ class BleUnlockEngine {
     }
   }
 
-  /// Build + write + wait (Demo SEND PACKET / Collect OPEN).
+  /// Build + write + wait (Demo SEND PACKET — still Phase-20 [RealPacketBuilder]).
   Future<ParsedBleResponse> sendPacket({
     required int command,
     required UnlockPacketRequest request,
@@ -394,10 +416,8 @@ class BleUnlockEngine {
       );
 
       onStage?.call('open');
-      final packet = buildPacket(
-        command: FirmwareCommand.open,
-        request: request,
-      );
+      // Phase 32 — Collect sends FINAL packet (Command 0x01 + current-order Port).
+      final packet = buildCollectPacket(request);
       BleLog.d('[BleUnlockEngine] Packet HEX ${_hex(packet)}');
       openParsed = await writeAndWait(packet: packet, timing: timing);
 
@@ -473,7 +493,7 @@ class BleUnlockEngine {
   }
 
   static void _logUnlockRequest(UnlockPacketRequest request) {
-    BleLog.d('── BleUnlockEngine.unlockOpen (Phase 20/31) ───────');
+    BleLog.d('── BleUnlockEngine.unlockOpen (Phase 32 FINAL packet) ──');
     BleLog.d('Order ID: ${request.orderId}');
     BleLog.d('Locker ID: ${request.lockerId}');
     BleLog.d('Terminal: ${request.terminalNumber}');

@@ -93,7 +93,7 @@ class LockerDetailsScreen extends ConsumerWidget {
                       crossAxisCount: columns,
                       mainAxisSpacing: 12,
                       crossAxisSpacing: 12,
-                      childAspectRatio: 0.72,
+                      childAspectRatio: 0.68,
                     ),
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
@@ -117,6 +117,7 @@ class LockerDetailsScreen extends ConsumerWidget {
                               if (context.mounted) {
                                 showAppSnackBar(context, userFacingError(e));
                               }
+                              rethrow;
                             }
                           },
                         );

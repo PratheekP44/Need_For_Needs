@@ -10,6 +10,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/money_format.dart';
 import '../../../core/utils/order_display.dart';
+import '../../../core/utils/product_image_url.dart';
 import '../../../core/widgets/app_brand.dart';
 import '../../../core/widgets/page_scaffold.dart';
 import '../../../core/widgets/product_image.dart';
@@ -75,8 +76,7 @@ class _AdminLoginScreenState extends ConsumerState<AdminLoginScreen> {
       appBar: AppBar(title: const Text('Admin login')),
       body: ResponsiveCenter(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: ListView(
           children: [
             const Center(
               child: AppBrand.full(iconHeight: 52, titleHeight: 32),
@@ -951,13 +951,9 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
       showAppSnackBar(context, 'Fill all required fields');
       return;
     }
-    if (imageUrl.isNotEmpty &&
-        !_looksLikeImageUrl(imageUrl) &&
-        _image == null) {
-      showAppSnackBar(
-        context,
-        'Image URL must be empty or a valid http(s) link',
-      );
+    final urlError = ProductImageUrlRules.validationError(imageUrl);
+    if (urlError != null && _image == null) {
+      showAppSnackBar(context, urlError);
       return;
     }
 
@@ -984,6 +980,14 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
       final mongoId = item['id']?.toString() ?? '';
       if (mongoId.isEmpty) {
         throw Exception('Item was created but no id was returned');
+      }
+      // Confirm Mongo persistence of imageUrl (source of truth).
+      if (imageUrl.isNotEmpty) {
+        final confirmed = await catalog.getItem(mongoId);
+        final stored = confirmed['imageUrl']?.toString() ?? '';
+        if (stored.isEmpty) {
+          throw Exception('Item saved but imageUrl was not stored in MongoDB');
+        }
       }
       if (_image != null) {
         try {
@@ -1152,15 +1156,6 @@ class _AdminAddItemScreenState extends ConsumerState<AdminAddItemScreen> {
   }
 }
 
-bool _looksLikeImageUrl(String value) {
-  if (value.startsWith('/')) return true;
-  final uri = Uri.tryParse(value);
-  if (uri == null) return false;
-  return uri.hasScheme &&
-      (uri.scheme == 'http' || uri.scheme == 'https') &&
-      uri.host.isNotEmpty;
-}
-
 class AdminEditItemScreen extends ConsumerStatefulWidget {
   const AdminEditItemScreen({super.key, required this.itemId});
 
@@ -1290,26 +1285,33 @@ class _AdminEditItemScreenState extends ConsumerState<AdminEditItemScreen> {
       showAppSnackBar(context, 'Name, description, and price are required');
       return;
     }
-    if (imageUrl.isNotEmpty && !_looksLikeImageUrl(imageUrl) && _image == null) {
-      showAppSnackBar(
-        context,
-        'Image URL must be empty or a valid http(s) link',
-      );
+    final urlError = ProductImageUrlRules.validationError(imageUrl);
+    if (urlError != null && _image == null) {
+      showAppSnackBar(context, urlError);
       return;
     }
 
     setState(() => _busy = true);
     try {
       final catalog = ref.read(catalogRepositoryProvider);
-      await catalog.updateItem(id, {
+      final originalUrl = (_existingImageUrl ?? '').trim();
+      final payload = <String, dynamic>{
         'name': _name.text.trim(),
         'description': _description.text.trim(),
         'brand': _brand.text.trim(),
         'sellingPrice': selling,
         'costPrice': ?cost,
-        'imageUrl': imageUrl,
-      });
-      if (_imageCleared && _image == null && imageUrl.isEmpty) {
+      };
+      // Preserve imageUrl unless the admin changed or intentionally cleared it.
+      // Omitting imageUrl lets the backend keep the existing Mongo value.
+      final urlChanged = imageUrl != originalUrl;
+      final intentionalClear =
+          _imageCleared && _image == null && imageUrl.isEmpty;
+      if (urlChanged || intentionalClear) {
+        payload['imageUrl'] = imageUrl;
+      }
+      await catalog.updateItem(id, payload);
+      if (intentionalClear) {
         await catalog.removeItemImage(id);
         _existingImageUrl = null;
       } else if (_image != null) {
@@ -1322,8 +1324,18 @@ class _AdminEditItemScreenState extends ConsumerState<AdminEditItemScreen> {
         if ((_existingImageUrl ?? '').isEmpty) {
           throw Exception('Image upload did not return imageUrl');
         }
-      } else {
+      } else if (urlChanged) {
         _existingImageUrl = imageUrl.isEmpty ? null : imageUrl;
+      }
+      // Re-fetch to confirm Mongo still has imageUrl after non-image edits.
+      final confirmed = await catalog.getItem(id);
+      final stored = confirmed['imageUrl']?.toString() ?? '';
+      if (!intentionalClear &&
+          originalUrl.isNotEmpty &&
+          !urlChanged &&
+          _image == null &&
+          stored.isEmpty) {
+        throw Exception('imageUrl was cleared unexpectedly during update');
       }
       await ref.read(adminViewModelProvider.notifier).refresh();
       if (!mounted) return;

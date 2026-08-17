@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// Official Need For Needs brand asset paths (do not relocate or regenerate).
+/// Official NeedForNeeds brand asset paths (do not relocate or regenerate).
 abstract final class BrandAssets {
-  static const String locker = 'assets/images/locker.png';
-  static const String title = 'assets/images/title.png';
+  static const String locker = 'assets/images/branding/locker.png';
+  static const String title = 'assets/images/branding/title.png';
 }
 
 /// Centralized application branding.
@@ -40,57 +40,74 @@ class AppBrand extends StatelessWidget {
         onLongPress = null;
 
   /// Vertical brand stack: locker above wordmark (splash / large centers).
+  ///
+  /// Pass [iconHeight] / [titleHeight] as `null` to size from the viewport
+  /// (recommended for splash). Explicit values keep fixed display sizes.
   const AppBrand.stacked({
     super.key,
-    this.iconHeight = 88,
-    this.titleHeight = 28,
-    this.spacing = 18,
+    this.iconHeight,
+    this.titleHeight,
+    this.spacing = 20,
     this.onLongPress,
   })  : mode = _BrandMode.stacked,
         alignment = MainAxisAlignment.center;
 
   final _BrandMode mode;
-  final double iconHeight;
-  final double titleHeight;
+  final double? iconHeight;
+  final double? titleHeight;
   final double spacing;
   final MainAxisAlignment alignment;
   final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
+    final size = MediaQuery.sizeOf(context);
+    final width = size.width;
     final narrow = width < 360;
+
+    final resolvedIcon = iconHeight ??
+        (mode == _BrandMode.stacked
+            ? (width * 0.24).clamp(80.0, 118.0)
+            : 48.0);
+    // Wordmark reads larger than the locker on splash — stronger brand presence.
+    final resolvedTitle = titleHeight ??
+        (mode == _BrandMode.stacked
+            ? (width * 0.155).clamp(48.0, 72.0)
+            : 36.0);
 
     Widget child;
     switch (mode) {
       case _BrandMode.icon:
-        child = _locker(iconHeight);
+        child = _locker(resolvedIcon);
       case _BrandMode.wordmark:
-        child = _title(titleHeight);
+        child = _title(resolvedTitle, maxWidth: width * 0.9);
       case _BrandMode.stacked:
         child = Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _locker(iconHeight),
+            _locker(resolvedIcon),
             SizedBox(height: spacing),
-            _title(titleHeight),
+            _title(resolvedTitle, maxWidth: width * 0.88),
           ],
         );
       case _BrandMode.full:
-        if (narrow) {
-          child = _locker(iconHeight);
-        } else {
-          child = Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: alignment,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              _locker(iconHeight),
-              SizedBox(width: spacing),
-              Flexible(child: _title(titleHeight)),
-            ],
-          );
-        }
+        // Always show locker + wordmark. Cap title width so small phones
+        // keep both assets proportional without horizontal overflow.
+        child = Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: alignment,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            _locker(resolvedIcon),
+            SizedBox(width: spacing),
+            Flexible(
+              child: _title(
+                resolvedTitle,
+                maxWidth: width * (narrow ? 0.58 : 0.65),
+              ),
+            ),
+          ],
+        );
     }
 
     if (onLongPress == null) return child;
@@ -114,17 +131,20 @@ class AppBrand extends StatelessWidget {
     );
   }
 
-  Widget _title(double height) {
-    return Image.asset(
-      BrandAssets.title,
-      height: height,
-      fit: BoxFit.contain,
-      filterQuality: FilterQuality.high,
-      errorBuilder: (context, error, stackTrace) => Text(
-        'Need For Needs',
-        style: TextStyle(
-          fontSize: height * 0.55,
-          fontWeight: FontWeight.w700,
+  Widget _title(double height, {required double maxWidth}) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Image.asset(
+        BrandAssets.title,
+        height: height,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+        errorBuilder: (context, error, stackTrace) => Text(
+          'NeedForNeeds',
+          style: TextStyle(
+            fontSize: height * 0.55,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );

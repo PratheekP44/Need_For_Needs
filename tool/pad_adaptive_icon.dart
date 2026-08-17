@@ -2,16 +2,16 @@
 
 import 'package:image/image.dart' as img;
 
-/// Pads locker.png into an adaptive-icon-safe foreground canvas.
-/// Does not modify assets/images/locker.png.
+/// Pads branding/locker.png into an adaptive-icon-safe foreground canvas.
+/// Does not modify assets/images/branding/locker.png.
 ///
 /// flutter_launcher_icons applies a further ~16% inset in ic_launcher.xml,
 /// so we keep logo content near ~90% of this canvas (~60% of the final icon,
 /// inside Android's 66% safe zone).
 void main() {
-  final srcFile = File('assets/images/locker.png');
+  final srcFile = File('assets/images/branding/locker.png');
   if (!srcFile.existsSync()) {
-    stderr.writeln('Missing assets/images/locker.png');
+    stderr.writeln('Missing assets/images/branding/locker.png');
     exit(1);
   }
   final src = img.decodeImage(srcFile.readAsBytesSync());

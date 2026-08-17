@@ -61,9 +61,9 @@ class HomeViewModel extends Notifier<HomeState> {
       final home = await homeFuture;
       final products = await productsFuture;
 
-      final categories = home.categories.isNotEmpty
-          ? home.categories
-          : categoriesFromProducts(products);
+      // Categories are derived only from currently available catalog items —
+      // never from a static/hardcoded backend category list.
+      final categories = categoriesFromProducts(products);
 
       state = HomeState(
         lockers: lockers,

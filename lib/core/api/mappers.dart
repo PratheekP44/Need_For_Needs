@@ -35,6 +35,16 @@ String _orderStatusLabel(String? raw) {
   }
 }
 
+/// Canonical product image field from API JSON (`imageUrl`, with legacy `image`).
+String canonicalImageUrl(Map<String, dynamic>? primary,
+    [Map<String, dynamic>? secondary]) {
+  return asString(primary?['imageUrl']) ??
+      asString(secondary?['imageUrl']) ??
+      asString(primary?['image']) ??
+      asString(secondary?['image']) ??
+      '';
+}
+
 Locker mapLocker(
   Map<String, dynamic> json, {
   int? distanceMeters,
@@ -111,7 +121,7 @@ Product mapStockToProduct(Map<String, dynamic> stock) {
         : int.tryParse('$boxNumberRaw'),
     availability: asString(stock['availability']) ??
         (qty > 0 ? 'available' : 'unavailable'),
-    imageUrl: asString(item['imageUrl']) ?? asString(stock['imageUrl']) ?? '',
+    imageUrl: canonicalImageUrl(item, stock),
     description:
         asString(item['description']) ?? asString(stock['description']) ?? '',
   );
@@ -141,7 +151,7 @@ InventoryRow mapStockToInventory(Map<String, dynamic> stock) {
         '—',
     boxId: asString(stock['boxId']) ?? asString(box['id']) ?? '',
     boxNumber: boxNumberRaw is num ? boxNumberRaw.toInt() : int.tryParse('$boxNumberRaw'),
-    imageUrl: asString(item['imageUrl']) ?? asString(stock['imageUrl']) ?? '',
+    imageUrl: canonicalImageUrl(item, stock),
     itemId: asString(item['id']) ?? asString(item['itemId']) ?? asString(stock['itemId']) ?? '',
     isEmpty: isEmpty,
     occupancy: asString(stock['occupancy']) ?? (isEmpty ? 'Empty' : 'Occupied'),
@@ -171,7 +181,7 @@ InventoryRow mapPhysicalBoxRow(Map<String, dynamic> json) {
     boxId: boxId,
     boxNumber:
         boxNumberRaw is num ? boxNumberRaw.toInt() : int.tryParse('$boxNumberRaw'),
-    imageUrl: asString(json['imageUrl']) ?? asString(item['imageUrl']) ?? '',
+    imageUrl: canonicalImageUrl(json, item),
     itemId: asString(json['itemId']) ??
         asString(item['id']) ??
         asString(item['itemId']) ??
@@ -218,7 +228,7 @@ CartLine mapCartLine(Map<String, dynamic> line) {
     boxId: asString(box['id']) ?? asString(box['boxId']) ?? '',
     lockerName: asString(locker['lockerName']) ?? '',
     boxNumber: box['boxNumber'] is num ? (box['boxNumber'] as num).toInt() : null,
-    imageUrl: asString(item['imageUrl']) ?? '',
+    imageUrl: canonicalImageUrl(item),
     description: asString(item['description']) ?? '',
   );
   return CartLine(
@@ -244,8 +254,8 @@ OrderSummary mapOrder(Map<String, dynamic> json) {
     final label = asString(box?['boxNumber']) ?? asString(box?['boxId']);
     if (label != null && label.isNotEmpty) boxes.add(label);
     final item = line['item'] is Map ? asMap(line['item']) : null;
-    final image = asString(item?['imageUrl']);
-    if (image != null && image.isNotEmpty) images.add(image);
+    final image = canonicalImageUrl(item);
+    if (image.isNotEmpty) images.add(image);
     final name = asString(item?['name']);
     if (name != null && name.isNotEmpty) names.add(name);
   }
@@ -319,21 +329,31 @@ AdminStats mapAdminStats(Map<String, dynamic> json) {
 }
 
 List<ProductCategory> categoriesFromProducts(List<Product> products) {
+  // Home (and callers) must only surface categories that currently have
+  // at least one purchasable / available item.
+  final available = products.where((p) => p.isAvailable).toList();
   final seen = <String>{};
   final out = <ProductCategory>[];
-  for (final p in products) {
-    if (!seen.add(p.categoryId)) continue;
-    final name = p.categoryId
-        .split('_')
-        .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+  for (final p in available) {
+    final id = p.categoryId.trim();
+    if (id.isEmpty || !seen.add(id.toUpperCase())) continue;
+    final name = id
+        .split(RegExp(r'[_\s]+'))
+        .where((w) => w.isNotEmpty)
+        .map((w) => '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}')
         .join(' ');
-    out.add(ProductCategory(
-      id: p.categoryId,
-      name: name.isEmpty ? 'General' : name,
-      icon: _categoryIconKey(name),
-      itemCount: products.where((x) => x.categoryId == p.categoryId).length,
-    ));
+    final count =
+        available.where((x) => x.categoryId.toUpperCase() == id.toUpperCase()).length;
+    out.add(
+      ProductCategory(
+        id: id,
+        name: name.isEmpty ? 'General' : name,
+        icon: _categoryIconKey(name),
+        itemCount: count,
+      ),
+    );
   }
+  out.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
   return out;
 }
 

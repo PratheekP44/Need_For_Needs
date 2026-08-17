@@ -1,11 +1,11 @@
 {
-    "name": "Need For Needs",
-    "short_name": "Need For Needs",
+    "name": "NeedForNeeds",
+    "short_name": "NeedForNeeds",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#222831",
     "theme_color": "#222831",
-    "description": "Need For Needs — smart campus lockers.",
+    "description": "NeedForNeeds — smart campus lockers.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

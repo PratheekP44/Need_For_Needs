@@ -129,6 +129,7 @@ itemSchema.pre('validate', function validatePrices() {
 });
 
 itemSchema.methods.toPublicObject = function toPublicObject(extra = {}) {
+  const { resolveStoredImageUrl } = require('../utils/imageUrl');
   return {
     id: this._id,
     itemId: this.itemId,
@@ -137,7 +138,7 @@ itemSchema.methods.toPublicObject = function toPublicObject(extra = {}) {
     category: this.category,
     brand: this.brand,
     barcode: this.barcode,
-    imageUrl: this.imageUrl,
+    imageUrl: resolveStoredImageUrl(this.imageUrl),
     sellingPrice: this.sellingPrice,
     costPrice: this.costPrice,
     gstPercentage: this.gstPercentage,
