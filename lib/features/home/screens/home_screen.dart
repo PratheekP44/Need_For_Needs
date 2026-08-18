@@ -114,7 +114,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final columns = responsiveColumns(context);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final homeBrandIcon = (screenWidth * 0.135).clamp(48.0, 58.0);
-    final homeBrandTitle = (screenWidth * 0.09).clamp(34.0, 42.0);
+    // Slightly larger wordmark; centered in space after the locker (not full-screen).
+    final homeBrandTitle = (screenWidth * 0.105).clamp(40.0, 50.0);
     final firstName = (auth.user?.name ?? 'there').split(' ').first;
     final lockers = home.lockers;
     final categories = home.categories;
@@ -163,11 +164,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               children: [
                                 SizedBox(
                                   width: double.infinity,
-                                  child: AppBrand.full(
-                                    iconHeight: homeBrandIcon,
-                                    titleHeight: homeBrandTitle,
-                                    spacing: 12,
-                                    alignment: MainAxisAlignment.start,
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      AppBrand.icon(
+                                        iconHeight: homeBrandIcon,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Center(
+                                          child: AppBrand.wordmark(
+                                            titleHeight: homeBrandTitle,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                                 const SizedBox(height: 14),

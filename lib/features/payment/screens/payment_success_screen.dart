@@ -14,7 +14,6 @@ import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/collection_countdown.dart';
-import '../../../core/utils/locker_feedback.dart';
 import '../../../core/widgets/page_scaffold.dart';
 import '../../../core/widgets/ui_kit.dart';
 import '../../../core/widgets/ux.dart';
@@ -546,93 +545,134 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
           : ListView(
               children: [
                 Text(
+                  'Collect your order',
+                  style: AppTextStyles.caption.copyWith(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.muted,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
                   lockerName,
-                  style: AppTextStyles.headline.copyWith(fontSize: 24),
+                  style: AppTextStyles.headline.copyWith(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
                 if (itemLines.isNotEmpty) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
                     itemLines
                         .map((l) => '${l.name} × ${l.quantity}')
                         .join(' · '),
-                    style: AppTextStyles.body.copyWith(color: AppColors.muted),
+                    style: AppTextStyles.body.copyWith(
+                      fontSize: 15,
+                      color: AppColors.muted,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
                 if (order?.isPendingCollection == true &&
                     order?.collectionDeadline != null &&
                     !_opened) ...[
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
                   Text(
                     expired ? 'Collection expired' : 'Collect within',
                     style: AppTextStyles.caption.copyWith(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                       color: expired ? AppColors.error : AppColors.muted,
                     ),
+                    textAlign: TextAlign.center,
                   ),
                   if (!expired) ...[
                     const SizedBox(height: 4),
                     Text(
                       _countdown,
                       style: AppTextStyles.headline.copyWith(
-                        fontSize: 32,
+                        fontSize: 30,
+                        fontWeight: FontWeight.w700,
                         letterSpacing: 1.2,
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
+                      textAlign: TextAlign.center,
                     ),
                   ],
                 ],
                 if (order?.isCollected == true && !_opened) ...[
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 12),
                   Text(
                     'Already collected',
                     style: AppTextStyles.label.copyWith(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
                       color: AppColors.success,
                     ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
                 if (order?.isCancelled == true) ...[
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 12),
                   Text(
                     'Cancelled',
                     style: AppTextStyles.label.copyWith(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
                       color: AppColors.error,
                     ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
                 if (boxInts.isNotEmpty && !_opened) ...[
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 18),
                   CollectBoxGrid(boxNumbers: boxInts),
                 ],
                 if (_opened) ...[
-                  const SizedBox(height: 36),
+                  const SizedBox(height: 20),
                   const Center(child: LockerOpenSuccessMark()),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Text(
                     'Locker opened',
-                    style: AppTextStyles.headline,
+                    style: AppTextStyles.headline.copyWith(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w700,
+                    ),
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
-                    'Your box is ready.',
-                    style: AppTextStyles.body.copyWith(color: AppColors.muted),
+                    'Your items are ready.',
+                    style: AppTextStyles.body.copyWith(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primaryText,
+                    ),
                     textAlign: TextAlign.center,
                   ),
-                  if (lockerOpenedBoxesLine(boxInts).isNotEmpty) ...[
+                  if (boxInts.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Text(
-                      lockerOpenedBoxesLine(boxInts),
-                      style: AppTextStyles.title,
+                      boxInts.length == 1
+                          ? 'Box: ${formatBoxLabel(boxInts.first)}'
+                          : 'Boxes: ${boxInts.map(formatBoxLabel).join(', ')}',
+                      style: AppTextStyles.title.copyWith(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ],
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   Text(
                     'Take your items and close the door.',
-                    style: AppTextStyles.caption,
+                    style: AppTextStyles.caption.copyWith(fontSize: 13),
                     textAlign: TextAlign.center,
                   ),
                 ] else if (!_busy) ...[
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 18),
                   Text(
                     expired
                         ? 'Collection window ended.'
@@ -640,50 +680,67 @@ class _CollectItemScreenState extends ConsumerState<CollectItemScreen> {
                             ? 'Unlock command sent. Check the locker, or try again.'
                             : collectProximityTip,
                     style: AppTextStyles.body.copyWith(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      height: 1.35,
                       color: expired
                           ? AppColors.error
                           : _commandSent
                               ? AppColors.primary
                               : AppColors.muted,
                     ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
                 if (_busy) ...[
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 18),
                   const LinearProgressIndicator(minHeight: 3),
                   if (_stage.isNotEmpty) ...[
-                    const SizedBox(height: 14),
-                    Text(_stage, style: AppTextStyles.title),
+                    const SizedBox(height: 12),
+                    Text(
+                      _stage,
+                      style: AppTextStyles.title.copyWith(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ],
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Text(
                     collectProximityTip,
-                    style: AppTextStyles.caption,
+                    style: AppTextStyles.caption.copyWith(fontSize: 13),
+                    textAlign: TextAlign.center,
                   ),
                 ],
                 if (!hasOrder) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Text(
                     'No order to collect.',
                     style: AppTextStyles.caption.copyWith(
+                      fontSize: 13,
                       color: AppColors.error,
                     ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
                 if (_error != null) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Text(
                     _error!,
                     style: AppTextStyles.body.copyWith(
+                      fontSize: 15,
                       color: AppColors.error,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
+                    textAlign: TextAlign.center,
                   ),
                   if (!_opened) ...[
                     const SizedBox(height: 6),
                     Text(
                       'Make sure you\'re near the locker and Bluetooth is enabled.',
-                      style: AppTextStyles.caption,
+                      style: AppTextStyles.caption.copyWith(fontSize: 13),
+                      textAlign: TextAlign.center,
                     ),
                   ],
                 ],

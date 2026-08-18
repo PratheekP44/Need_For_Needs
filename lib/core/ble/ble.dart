@@ -24,6 +24,7 @@ export 'models/packet_payload.dart';
 export 'models/packet_result.dart';
 export 'models/unlock_payload.dart';
 export 'protocol/ble_protocol.dart';
+export 'protocol/ble_response_observation.dart';
 export 'protocol/box_unlock_mask.dart';
 export 'protocol/checksum.dart';
 export 'protocol/packet_builder.dart';

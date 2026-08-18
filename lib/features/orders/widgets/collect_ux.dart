@@ -6,7 +6,7 @@ import '../../../core/utils/order_display.dart';
 
 /// Subtle proximity tip shown on Collect (one tasteful line).
 const String collectProximityTip =
-    'Stay near the locker — BLE has commitment issues at a distance.';
+    'Stay near the locker — Bluetooth works better nearby.';
 
 /// Compact locker face: cells 1…N, only [highlight] boxes emphasized.
 ///
@@ -34,23 +34,29 @@ class CollectBoxGrid extends StatelessWidget {
     final cellCount = maxBox.clamp(1, 16);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text(
           sorted.length == 1 ? 'Box opening' : 'Boxes opening',
-          style: AppTextStyles.caption.copyWith(color: AppColors.muted),
+          style: AppTextStyles.label.copyWith(
+            fontSize: 14,
+            color: AppColors.muted,
+            fontWeight: FontWeight.w600,
+          ),
+          textAlign: TextAlign.center,
         ),
         const SizedBox(height: 10),
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          alignment: WrapAlignment.center,
+          spacing: 10,
+          runSpacing: 10,
           children: sorted
               .map(
                 (n) => Container(
                   constraints:
-                      const BoxConstraints(minWidth: 56, minHeight: 48),
+                      const BoxConstraints(minWidth: 60, minHeight: 52),
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   decoration: BoxDecoration(
                     color: AppColors.primaryDark,
                     borderRadius: BorderRadius.circular(12),
@@ -59,6 +65,8 @@ class CollectBoxGrid extends StatelessWidget {
                   child: Text(
                     formatBoxLabel(n),
                     style: AppTextStyles.title.copyWith(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
                       color: AppColors.cream,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
@@ -68,10 +76,14 @@ class CollectBoxGrid extends StatelessWidget {
               .toList(),
         ),
         if (cellCount > 1 && cellCount <= 12) ...[
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           Text(
             'Your locker',
-            style: AppTextStyles.caption.copyWith(color: AppColors.muted),
+            style: AppTextStyles.caption.copyWith(
+              fontSize: 13,
+              color: AppColors.muted,
+            ),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           LayoutBuilder(
@@ -80,6 +92,7 @@ class CollectBoxGrid extends StatelessWidget {
               final colW =
                   (constraints.maxWidth - gap * (columns - 1)) / columns;
               return Wrap(
+                alignment: WrapAlignment.center,
                 spacing: gap,
                 runSpacing: gap,
                 children: List.generate(cellCount, (i) {
@@ -87,7 +100,7 @@ class CollectBoxGrid extends StatelessWidget {
                   final on = highlight.contains(n);
                   return SizedBox(
                     width: colW,
-                    height: 40,
+                    height: 38,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: on
@@ -104,6 +117,7 @@ class CollectBoxGrid extends StatelessWidget {
                         child: Text(
                           formatBoxLabel(n),
                           style: AppTextStyles.caption.copyWith(
+                            fontSize: 13,
                             color: on ? AppColors.cream : AppColors.muted,
                             fontWeight:
                                 on ? FontWeight.w700 : FontWeight.w500,
@@ -163,8 +177,8 @@ class _LockerOpenSuccessMarkState extends State<LockerOpenSuccessMark>
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 96,
-      width: 96,
+      height: 88,
+      width: 88,
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
@@ -173,8 +187,8 @@ class _LockerOpenSuccessMarkState extends State<LockerOpenSuccessMark>
             alignment: Alignment.center,
             children: [
               Container(
-                width: 72,
-                height: 72,
+                width: 68,
+                height: 68,
                 decoration: BoxDecoration(
                   color: AppColors.surfaceMuted,
                   borderRadius: BorderRadius.circular(14),
@@ -188,8 +202,8 @@ class _LockerOpenSuccessMarkState extends State<LockerOpenSuccessMark>
                 child: Opacity(
                   opacity: (1 - open * 0.85).clamp(0.0, 1.0),
                   child: Container(
-                    width: 34,
-                    height: 56,
+                    width: 32,
+                    height: 52,
                     decoration: BoxDecoration(
                       color: AppColors.primaryDark,
                       borderRadius: BorderRadius.circular(6),
@@ -208,7 +222,7 @@ class _LockerOpenSuccessMarkState extends State<LockerOpenSuccessMark>
                   scale: 0.7 + 0.3 * _check.value,
                   child: const Icon(
                     Icons.check_rounded,
-                    size: 40,
+                    size: 38,
                     color: AppColors.primaryDark,
                   ),
                 ),

@@ -5,6 +5,7 @@ import '../locker/locker_service.dart';
 import '../managers/ble_connection_manager.dart';
 import '../managers/timeout_manager.dart';
 import '../models/ble_device.dart';
+import '../protocol/ble_response_observation.dart';
 import '../protocol/final_unlock_packet_builder.dart';
 import '../protocol/packet_parser.dart';
 import '../protocol/packet_types.dart';
@@ -61,6 +62,9 @@ class BleUnlockEngine {
   /// reused within this app process for faster reconnect — never hardcoded.
   BleDevice? _sessionDevice;
   String _sessionTargetName = defaultTargetName;
+
+  /// Phase 44A — per Collect attempt response sequence (observation only).
+  int _collectResponseSeq = 0;
 
   LockerService get locker => _locker;
 
@@ -362,6 +366,12 @@ class BleUnlockEngine {
       BleLog.d(
         '[BleUnlockEngine] Notification HEX ${_hex(raw)}',
       );
+      // Phase 44A — observe only; does not affect success/failure.
+      _collectResponseSeq += 1;
+      BleResponseObservation.inspect(
+        raw,
+        sequence: _collectResponseSeq,
+      ).log();
       return _parser.parse(raw);
     } on TimeoutException catch (e) {
       BleLog.e('[BleUnlockEngine] Notification timeout', e);
@@ -403,6 +413,7 @@ class BleUnlockEngine {
     void Function(String stage)? onStage,
   }) async {
     final timing = CollectBleProfiler();
+    _collectResponseSeq = 0;
     _logUnlockRequest(request);
 
     ParsedBleResponse? openParsed;

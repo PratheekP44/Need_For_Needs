@@ -53,7 +53,8 @@ class ProductImage extends ConsumerWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: ColoredBox(
-        color: AppColors.surfaceMuted,
+        // Letterbox canvas only — keep BoxFit.contain; do not crop/zoom.
+        color: Colors.white,
         child: CachedNetworkImage(
           imageUrl: url,
           height: height,
