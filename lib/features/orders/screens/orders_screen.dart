@@ -72,7 +72,7 @@ class _OrderRow extends StatelessWidget {
         ? order.lockerName
         : (order.lockerNumber.isNotEmpty ? order.lockerNumber : '');
     final status = friendlyOrderStatus(order.status);
-    final ready = order.status == 'Ready to collect' && order.canCollect;
+    final ready = order.canCollect;
     final day = order.paidAt != null
         ? formatOrderDay(order.paidAt)
         : formatOrderDay(null, fallback: order.placedAt);

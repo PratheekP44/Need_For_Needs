@@ -174,7 +174,7 @@ InventoryRow mapPhysicalBoxRow(Map<String, dynamic> json) {
         ? 'Empty Box'
         : (asString(json['itemName']) ?? asString(item['name']) ?? 'Item'),
     price: asDouble(json['price'], asDouble(item['sellingPrice'])),
-    quantity: isEmpty ? 0 : 1,
+    quantity: isEmpty ? 0 : asInt(json['quantity'], 1),
     assignedLocker: asString(locker['lockerName']) ??
         asString(locker['lockerId']) ??
         '—',
@@ -246,10 +246,12 @@ OrderSummary mapOrder(Map<String, dynamic> json) {
   final boxes = <String>{};
   final images = <String>[];
   final names = <String>[];
+  final lines = <OrderLineItem>[];
   var itemCount = 0;
   for (final raw in items) {
     final line = asMap(raw);
-    itemCount += asInt(line['quantity'], 1);
+    final qty = asInt(line['quantity'], 1);
+    itemCount += qty;
     final box = line['box'] is Map ? asMap(line['box']) : null;
     final label = asString(box?['boxNumber']) ?? asString(box?['boxId']);
     if (label != null && label.isNotEmpty) boxes.add(label);
@@ -257,7 +259,17 @@ OrderSummary mapOrder(Map<String, dynamic> json) {
     final image = canonicalImageUrl(item);
     if (image.isNotEmpty) images.add(image);
     final name = asString(item?['name']);
-    if (name != null && name.isNotEmpty) names.add(name);
+    if (name != null && name.isNotEmpty) {
+      names.add(name);
+      lines.add(
+        OrderLineItem(
+          name: name,
+          quantity: qty < 1 ? 1 : qty,
+          imageUrl: image,
+          boxLabel: label ?? '',
+        ),
+      );
+    }
   }
   final created = asString(json['createdAt']) ?? '';
   final rawStatus = (asString(json['status']) ?? '').toUpperCase();
@@ -270,12 +282,18 @@ OrderSummary mapOrder(Map<String, dynamic> json) {
     rawStatus: rawStatus,
     total: asDouble(json['grandTotal']),
     placedAt: created.length >= 16 ? created.substring(0, 16).replaceFirst('T', ' ') : created,
-    boxes: boxes.toList(),
+    boxes: boxes.toList()..sort((a, b) {
+      final na = int.tryParse(a);
+      final nb = int.tryParse(b);
+      if (na != null && nb != null) return na.compareTo(nb);
+      return a.compareTo(b);
+    }),
     itemCount: itemCount,
     paymentStatus: asString(json['paymentStatus']) ?? '',
     collectionToken: asString(json['collectionToken']) ?? '',
     itemImages: images,
     itemNames: names,
+    lines: lines,
     customerName: asString(user['name']) ?? '',
     customerEmail: asString(user['email']) ?? '',
     terminalNumber: locker['terminalNumber'] == null

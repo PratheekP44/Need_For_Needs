@@ -4,10 +4,20 @@ const orderRepository = require('../repositories/order.repository');
 const AppError = require('../utils/AppError');
 const { formatOrder } = require('./order.service');
 const logger = require('../config/logger');
+const inventoryEvents = require('./inventory.events');
 const {
   expireOrderIfNeeded,
   assertCollectible,
 } = require('./orderExpiration.service');
+const {
+  releaseStocksForCollectedOrder,
+} = require('./stockBoxLifecycle.service');
+
+function stockIdsFromOrder(order) {
+  return (order?.items || [])
+    .map((line) => String(line.stock?._id || line.stock || ''))
+    .filter(Boolean);
+}
 
 /**
  * Parses a positive int from locker / box labels (`LCK-01`, `BOX-03`, `3`).
@@ -177,7 +187,8 @@ class CollectUnlockService {
 
   /**
    * Mark order COLLECTED after successful BLE unlock on device.
-   * Re-validates deadline so an expired order cannot be marked collected.
+   * Releases ONLY this order's stock rows (boxes become empty), then emits
+   * inventory_updated so Admin Inventory / Assign refresh via SSE.
    */
   async markCollected(auth, orderId, opts = {}) {
     let order = await orderRepository.findByIdOrOrderNumber(orderId);
@@ -188,6 +199,15 @@ class CollectUnlockService {
     assertOwner(auth, order);
 
     if (order.status === 'COLLECTED') {
+      // Repair prior incomplete releases (order COLLECTED, stock row left behind).
+      const repaired = await releaseStocksForCollectedOrder(order);
+      if (repaired > 0) {
+        inventoryEvents.publish({
+          reason: 'collect_complete',
+          orderNumber: order.orderNumber,
+          stockIds: stockIdsFromOrder(order),
+        });
+      }
       return formatOrder(order);
     }
 
@@ -197,13 +217,27 @@ class CollectUnlockService {
     });
     assertCollectible(order, { now: opts.now });
 
+    // Free boxes BEFORE COLLECTED so a release failure does not leave
+    // COLLECTED + occupied inventory. BLE already succeeded on device.
+    const freed = await releaseStocksForCollectedOrder(order);
+
     const updated = await orderRepository.updateById(order._id, {
       status: 'COLLECTED',
       collectedAt: new Date(),
     });
 
+    inventoryEvents.publish({
+      reason: 'collect_complete',
+      orderNumber: order.orderNumber,
+      stockIds: stockIdsFromOrder(order),
+    });
+
     logger.info(
-      { orderId: String(order._id), status: 'COLLECTED' },
+      {
+        orderId: String(order._id),
+        status: 'COLLECTED',
+        boxesFreed: freed,
+      },
       'collect-complete',
     );
 

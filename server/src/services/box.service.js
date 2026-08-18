@@ -70,6 +70,12 @@ class BoxService {
       const stockFilter = {};
       if (listQuery.filter.locker) {
         stockFilter.locker = listQuery.filter.locker;
+        // Align with inventory: free orphan zero-qty rows for this locker.
+        const { purgeOrphanZeroQtyStocks } = require('./stockBoxLifecycle.service');
+        await purgeOrphanZeroQtyStocks({ lockerId: listQuery.filter.locker });
+      } else {
+        const { purgeOrphanZeroQtyStocks } = require('./stockBoxLifecycle.service');
+        await purgeOrphanZeroQtyStocks({});
       }
       const occupiedBoxIds = await Stock.distinct('box', stockFilter);
       listQuery.filter._id = { $nin: occupiedBoxIds };

@@ -33,7 +33,7 @@ void main() {
 
   testWidgets('ProductCard fits tight grid cell without overflow',
       (tester) async {
-    final product = const Product(
+    const product = Product(
       id: 'p1',
       name: 'Test Snack Item',
       price: 25,
@@ -45,28 +45,43 @@ void main() {
       availability: 'available',
     );
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          cartViewModelProvider.overrideWith(_EmptyCart.new),
-        ],
-        child: MediaQuery(
-          data: const MediaQueryData(size: Size(360, 640)),
-          child: MaterialApp(
-            home: Scaffold(
-              body: Center(
-                child: SizedBox(
-                  width: 154,
-                  height: 214, // ~0.72 aspect on ~360px / 2 cols
-                  child: ProductCard(product: product, width: 154),
+    Future<void> pumpCard({Future<void> Function()? onAddToCart}) {
+      return tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            cartViewModelProvider.overrideWith(_EmptyCart.new),
+          ],
+          child: MediaQuery(
+            data: const MediaQueryData(size: Size(360, 640)),
+            child: MaterialApp(
+              home: Scaffold(
+                body: Center(
+                  child: SizedBox(
+                    width: 154,
+                    height: 214, // ~0.72 aspect on ~360px / 2 cols
+                    child: ProductCard(
+                      product: product,
+                      width: 154,
+                      onAddToCart: onAddToCart,
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
         ),
-      ),
-    );
+      );
+    }
 
+    // No cart action → CTA is intentionally disabled ("Out of stock" label).
+    await pumpCard();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Out of stock'), findsOneWidget);
+    expect(find.text('Add to Cart'), findsNothing);
+
+    // With cart action → primary CTA visible, still no overflow.
+    await pumpCard(onAddToCart: () async {});
     await tester.pump();
     expect(tester.takeException(), isNull);
     expect(find.text('Add to Cart'), findsOneWidget);

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/constants/route_constants.dart';
 import '../../../core/data/models.dart';
+import '../../../core/providers/catalog_refresh.dart';
 import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -477,11 +478,23 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
   bool _loading = true;
   String? _error;
   String? _deletingId;
+  ProviderSubscription<int>? _inventoryEpochSub;
 
   @override
   void initState() {
     super.initState();
     Future.microtask(_bootstrap);
+    _inventoryEpochSub = ref.listenManual(inventoryEpochProvider, (prev, next) {
+      if (prev != null && prev != next && mounted) {
+        _reload();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _inventoryEpochSub?.close();
+    super.dispose();
   }
 
   Future<void> _bootstrap() async {
@@ -528,8 +541,10 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
   Future<void> _reload() => _bootstrap();
 
   Future<void> _confirmRemove(InventoryRow row) async {
-    final stockKey = row.id.startsWith('box:') ? '' : row.id;
-    if (row.isEmpty || stockKey.isEmpty) {
+    final stockKey = row.stockId.isNotEmpty
+        ? row.stockId
+        : (row.id.startsWith('box:') ? '' : row.id);
+    if (stockKey.isEmpty) {
       showAppSnackBar(context, 'Box is already empty');
       return;
     }
@@ -612,7 +627,9 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
             foregroundColor: AppColors.onPrimary,
             elevation: 3,
             onPressed: () async {
-              await context.push('/admin/inventory/assign');
+              final lid = _lockerMongoId;
+              final q = lid != null && lid.isNotEmpty ? '?lockerId=$lid' : '';
+              await context.push('/admin/inventory/assign$q');
               if (mounted) _reload();
             },
             icon: const Icon(Icons.inventory_2_outlined),
@@ -627,7 +644,10 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
             backgroundColor: AppColors.primary,
             foregroundColor: AppColors.onPrimary,
             elevation: 3,
-            onPressed: () => context.push('/admin/inventory/add'),
+            onPressed: () async {
+              await context.push('/admin/inventory/add');
+              if (mounted) _reload();
+            },
             icon: const Icon(Icons.add_rounded),
             label: const Text(
               'Add item',
@@ -811,8 +831,13 @@ class _AdminInventoryScreenState extends ConsumerState<AdminInventoryScreen> {
                                           IconButton(
                                             tooltip: 'Assign item',
                                             onPressed: () async {
+                                              final lid = _lockerMongoId;
+                                              final q = lid != null &&
+                                                      lid.isNotEmpty
+                                                  ? '?lockerId=$lid'
+                                                  : '';
                                               await context.push(
-                                                '/admin/inventory/assign',
+                                                '/admin/inventory/assign$q',
                                               );
                                               if (mounted) _reload();
                                             },
@@ -1429,9 +1454,15 @@ class _AdminEditItemScreenState extends ConsumerState<AdminEditItemScreen> {
 }
 
 class AdminAssignStockScreen extends ConsumerStatefulWidget {
-  const AdminAssignStockScreen({super.key, this.initialItemId});
+  const AdminAssignStockScreen({
+    super.key,
+    this.initialItemId,
+    this.lockerId,
+  });
 
   final String? initialItemId;
+  /// When set, empty boxes are scoped to this locker (same source as Inventory).
+  final String? lockerId;
 
   @override
   ConsumerState<AdminAssignStockScreen> createState() =>
@@ -1442,11 +1473,13 @@ class _AdminAssignStockScreenState extends ConsumerState<AdminAssignStockScreen>
   List<Map<String, dynamic>> _items = const [];
   List<Map<String, dynamic>> _emptyBoxes = const [];
   String? _itemId;
+  String? _lockerId;
   final _qty = TextEditingController(text: '1');
   final Set<String> _selectedBoxIds = {};
   bool _loading = true;
   bool _busy = false;
   String? _error;
+  ProviderSubscription<int>? _inventoryEpochSub;
 
   int get _needed {
     final n = int.tryParse(_qty.text.trim());
@@ -1460,13 +1493,33 @@ class _AdminAssignStockScreenState extends ConsumerState<AdminAssignStockScreen>
   void initState() {
     super.initState();
     _itemId = widget.initialItemId;
+    _lockerId = widget.lockerId;
     Future.microtask(_bootstrap);
+    _inventoryEpochSub = ref.listenManual(inventoryEpochProvider, (prev, next) {
+      if (prev != null && prev != next && mounted) {
+        _reloadEmptyBoxes();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _inventoryEpochSub?.close();
     _qty.dispose();
     super.dispose();
+  }
+
+  /// Prefer explicit locker, else Campus Gate, else first locker.
+  Future<String?> _resolveLockerId() async {
+    if (_lockerId != null && _lockerId!.isNotEmpty) return _lockerId;
+    final lockers = await ref.read(lockerRepositoryProvider).list();
+    if (lockers.isEmpty) return null;
+    final campus = lockers.where(
+      (l) =>
+          l.lockerCode.toUpperCase() == 'LCK-DEMO-06742' ||
+          l.name.toLowerCase().contains('campus gate'),
+    );
+    return campus.isNotEmpty ? campus.first.id : lockers.first.id;
   }
 
   Future<void> _bootstrap() async {
@@ -1476,9 +1529,12 @@ class _AdminAssignStockScreenState extends ConsumerState<AdminAssignStockScreen>
     });
     try {
       final catalog = ref.read(catalogRepositoryProvider);
+      final lockerId = await _resolveLockerId();
       final items = await catalog.listItems();
-      final boxes = await catalog.listEmptyBoxes();
+      final boxes = await catalog.listEmptyBoxes(lockerId: lockerId);
+      if (!mounted) return;
       setState(() {
+        _lockerId = lockerId;
         _items = items;
         _emptyBoxes = boxes;
         _loading = false;
@@ -1487,6 +1543,7 @@ class _AdminAssignStockScreenState extends ConsumerState<AdminAssignStockScreen>
         }
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _loading = false;
         _error = userFacingError(e);
@@ -1496,10 +1553,13 @@ class _AdminAssignStockScreenState extends ConsumerState<AdminAssignStockScreen>
 
   Future<void> _reloadEmptyBoxes() async {
     try {
-      final boxes =
-          await ref.read(catalogRepositoryProvider).listEmptyBoxes();
+      final lockerId = await _resolveLockerId();
+      final boxes = await ref
+          .read(catalogRepositoryProvider)
+          .listEmptyBoxes(lockerId: lockerId);
       if (!mounted) return;
       setState(() {
+        _lockerId = lockerId;
         _emptyBoxes = boxes;
         _selectedBoxIds.removeWhere(
           (id) => !boxes.any((b) => b['id']?.toString() == id),
@@ -1707,8 +1767,10 @@ class _AdminAssignStockScreenState extends ConsumerState<AdminAssignStockScreen>
           Text('Empty boxes', style: AppTextStyles.title),
           const SizedBox(height: 8),
           if (_emptyBoxes.isEmpty)
-            const EmptyState(
-              message: 'No empty boxes available',
+            EmptyState(
+              message: _lockerId != null && _lockerId!.isNotEmpty
+                  ? 'No empty boxes available for this locker'
+                  : 'No empty boxes available',
               icon: Icons.inbox_outlined,
             )
           else

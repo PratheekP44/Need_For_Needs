@@ -13,7 +13,11 @@ const { parseListQuery, buildPagination } = require('../utils/query');
 const {
   deriveStockStatus,
   deriveBoxOccupancyFromStock,
+  isBoxPhysicallyOccupied,
+  summarizeLockerBoxState,
 } = require('../utils/stockStatus');
+const { purgeOrphanZeroQtyStocks } = require('./stockBoxLifecycle.service');
+const inventoryEvents = require('./inventory.events');
 
 function formatNested(doc, fields) {
   if (!doc) return null;
@@ -242,9 +246,8 @@ class StockService {
         409,
       );
     }
-    if (box.isEmpty === false && box.status !== 'EMPTY') {
-      throw new AppError('Box already occupied', 409);
-    }
+    // Stock-row presence is checked atomically via existsByBox / unique index.
+    // Do not trust stale Box.isEmpty alone.
   }
 
   async resolveBox(boxRef) {
@@ -338,21 +341,30 @@ class StockService {
       'OUT_OF_STOCK',
     );
 
-    const stock = await stockRepository.create({
-      stockId,
-      locker: locker._id,
-      box: box._id,
-      item: item._id,
-      currentQuantity,
-      maximumQuantity,
-      reorderLevel,
-      expiryDate: payload.expiryDate || null,
-      batchNumber: payload.batchNumber || '',
-      supplierName: payload.supplierName || '',
-      purchaseDate: payload.purchaseDate || null,
-      status,
-      lastRestocked: currentQuantity > 0 ? new Date() : null,
-    });
+    let stock;
+    try {
+      stock = await stockRepository.create({
+        stockId,
+        locker: locker._id,
+        box: box._id,
+        item: item._id,
+        currentQuantity,
+        maximumQuantity,
+        reorderLevel,
+        expiryDate: payload.expiryDate || null,
+        batchNumber: payload.batchNumber || '',
+        supplierName: payload.supplierName || '',
+        purchaseDate: payload.purchaseDate || null,
+        status,
+        lastRestocked: currentQuantity > 0 ? new Date() : null,
+      });
+    } catch (err) {
+      // Unique index on box: race between two admins assigning the same box.
+      if (err && (err.code === 11000 || err.code === '11000')) {
+        throw new AppError('Box already occupied', 409);
+      }
+      throw err;
+    }
 
     await syncBoxOccupancy(box, stock);
 
@@ -370,7 +382,15 @@ class StockService {
     });
 
     const populated = await stockRepository.findById(stock._id);
-    return formatStock(populated);
+    const formatted = formatStock(populated);
+    // Batch assign publishes once after all rows; single assign notifies here.
+    if (!payload._skipInventoryEvent) {
+      inventoryEvents.publish({
+        reason: 'stock_assigned',
+        stockIds: [String(formatted.id || stock._id)],
+      });
+    }
+    return formatted;
   }
 
   /**
@@ -433,6 +453,7 @@ class StockService {
           supplierName: payload.supplierName || '',
           purchaseDate: payload.purchaseDate || null,
           stockId: `STK-${Date.now()}-${i}-${Math.random().toString(16).slice(2, 6)}`,
+          _skipInventoryEvent: true,
         },
         adminId,
       );
@@ -450,6 +471,11 @@ class StockService {
         boxIds: resolvedBoxes.map((b) => b.boxId || String(b._id)),
         stockIds: stocks.map((s) => s.stockId),
       },
+    });
+
+    inventoryEvents.publish({
+      reason: 'stock_assigned',
+      stockIds: stocks.map((s) => String(s.id || s._id || '')).filter(Boolean),
     });
 
     return {
@@ -676,6 +702,10 @@ class StockService {
       }
     }
 
+    // Purge orphan zero-qty stock (not held by cart/order) so empty count
+    // matches GET /boxes?unassigned=true assignable boxes.
+    await purgeOrphanZeroQtyStocks({ lockerId: locker._id });
+
     const boxes = await boxRepository.findByLocker(locker._id);
     const stocks = await stockRepository.findByLocker(locker._id);
     const stockByBoxId = new Map();
@@ -696,7 +726,8 @@ class StockService {
     for (const box of boxes) {
       const stock = stockByBoxId.get(String(box._id));
       const qty = stock ? Number(stock.currentQuantity) || 0 : 0;
-      const occupied = Boolean(stock && stock.item && qty > 0);
+      // Canonical: occupied = stock row present (same as Assign availability).
+      const occupied = isBoxPhysicallyOccupied(stock);
 
       if (occupancyFilter === 'occupied' && !occupied) continue;
       if (occupancyFilter === 'empty' && occupied) continue;
@@ -712,6 +743,7 @@ class StockService {
 
       const itemDoc =
         stock?.item && typeof stock.item === 'object' ? stock.item : null;
+      const showItem = occupied && qty > 0;
 
       rows.push({
         boxId: box._id,
@@ -720,23 +752,25 @@ class StockService {
         boxStatus: box.status,
         isEmpty: !occupied,
         occupancy: occupied ? 'Occupied' : 'Empty',
-        quantity: occupied ? 1 : 0,
+        quantity: occupied ? Math.max(qty, 0) : 0,
         stockId: stock?._id || null,
         stockCode: stock?.stockId || '',
         stockStatus: stock?.status || null,
-        item: occupied && itemDoc
+        item: showItem && itemDoc
           ? formatItem(itemDoc)
-          : occupied && stock?.item
+          : showItem && stock?.item
             ? stock.item
             : null,
-        itemId: occupied ? itemDoc?._id || stock?.item || null : null,
-        itemName: occupied
+        itemId: showItem ? itemDoc?._id || stock?.item || null : null,
+        itemName: showItem
           ? itemDoc?.name || 'Item'
-          : null,
-        imageUrl: occupied
+          : occupied && qty <= 0
+            ? 'Awaiting collection'
+            : null,
+        imageUrl: showItem
           ? (itemDoc ? formatItem(itemDoc).imageUrl : '') || ''
           : '',
-        price: occupied ? Number(itemDoc?.sellingPrice) || 0 : 0,
+        price: showItem ? Number(itemDoc?.sellingPrice) || 0 : 0,
         locker: {
           id: locker._id,
           lockerId: locker.lockerId,
@@ -748,10 +782,7 @@ class StockService {
     }
 
     // Summary is always for the full locker (not the filtered subset).
-    const totalBoxes = boxes.length;
-    const fullOccupied = [...stockByBoxId.values()].filter(
-      (s) => s.item && Number(s.currentQuantity) > 0,
-    ).length;
+    const summary = summarizeLockerBoxState(boxes, stockByBoxId);
 
     return {
       locker: {
@@ -762,11 +793,7 @@ class StockService {
         terminalNumber: locker.terminalNumber,
         totalBoxes: locker.totalBoxes,
       },
-      summary: {
-        totalBoxes,
-        occupiedBoxes: fullOccupied,
-        emptyBoxes: totalBoxes - fullOccupied,
-      },
+      summary,
       boxes: rows,
     };
   }
@@ -1097,6 +1124,11 @@ class StockService {
         boxId: box?.boxId,
         itemId: stock.item?.itemId || stock.item,
       },
+    });
+
+    inventoryEvents.publish({
+      reason: 'stock_removed',
+      stockIds: [String(stock._id)],
     });
 
     return {

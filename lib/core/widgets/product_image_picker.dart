@@ -117,11 +117,15 @@ class _ProductImagePickerFieldState extends State<ProductImagePickerField> {
   Widget build(BuildContext context) {
     Widget preview;
     if (_selection != null) {
-      preview = Image.memory(
-        _selection!.bytes,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: 180,
+      preview = ColoredBox(
+        color: AppColors.surfaceMuted,
+        child: Image.memory(
+          _selection!.bytes,
+          fit: BoxFit.contain,
+          width: double.infinity,
+          height: 180,
+          alignment: Alignment.center,
+        ),
       );
     } else if ((_previewUrl ?? '').isNotEmpty) {
       preview = ProductImage(

@@ -42,6 +42,7 @@ void main() {
     );
     expect(config.targetDeviceName, 'LKRM-V2');
     expect(config.deviceNamePrefix, isEmpty);
-    expect(config.scanTimeout, const Duration(seconds: 15));
+    // Phase 31: hard scan ceiling is 5s (early-stop on LKRM-V2); not a 15s floor.
+    expect(config.scanTimeout, const Duration(seconds: 5));
   });
 }

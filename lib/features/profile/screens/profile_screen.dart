@@ -7,7 +7,6 @@ import '../../../core/ble/ble.dart';
 import '../../../core/providers/core_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
-import '../../../core/utils/money_format.dart';
 import '../../../core/widgets/page_scaffold.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/ui_kit.dart';
@@ -20,186 +19,131 @@ class ProfileScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authSessionProvider);
     final user = auth.user;
-    final lockersAsync = ref.watch(_nearbyLockerNamesProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Profile'), automaticallyImplyLeading: false),
-      body: ResponsiveCenter(
-        maxWidth: 720,
-        padding: const EdgeInsets.all(20),
-        child: ListView(
-          children: [
-            SoftPanel(
-              child: auth.isLoading
-                  ? const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  : Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 32,
-                          backgroundColor: AppColors.surfaceMuted,
-                          child: Text(
-                            (user?.name.isNotEmpty == true)
-                                ? user!.name[0].toUpperCase()
-                                : '?',
-                            style: AppTextStyles.headline
-                                .copyWith(color: AppColors.primary),
+      appBar: AppBar(
+        title: const Text('Profile'),
+        automaticallyImplyLeading: false,
+      ),
+      body: SafeArea(
+        child: ResponsiveCenter(
+          maxWidth: 720,
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: ListView(
+            children: [
+              if (auth.isLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 32),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    CircleAvatar(
+                      radius: 28,
+                      backgroundColor: AppColors.surfaceMuted,
+                      child: Text(
+                        (user?.name.isNotEmpty == true)
+                            ? user!.name[0].toUpperCase()
+                            : '?',
+                        style: AppTextStyles.headline
+                            .copyWith(color: AppColors.primary, fontSize: 22),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            user?.name ?? 'Guest',
+                            style: AppTextStyles.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
+                          if ((user?.email ?? '').isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              user!.email,
+                              style: AppTextStyles.caption,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                          if ((user?.phone ?? '').isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              user!.phone,
+                              style: AppTextStyles.caption,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 28),
+              ],
+              _ProfileTile(
+                icon: Icons.receipt_long_outlined,
+                label: 'Order History',
+                onTap: () => context.go('/orders'),
+              ),
+              _ProfileTile(
+                icon: Icons.settings_outlined,
+                label: 'Settings',
+                onTap: () => context.push('/settings'),
+              ),
+              _ProfileTile(
+                icon: Icons.help_outline_rounded,
+                label: 'Help',
+                onTap: () => context.push('/help'),
+              ),
+              if (auth.isAdmin)
+                _ProfileTile(
+                  icon: Icons.admin_panel_settings_outlined,
+                  label: 'Admin Portal',
+                  onTap: () => context.push('/admin/dashboard'),
+                ),
+              const SizedBox(height: 16),
+              SecondaryButton(
+                label: 'Log out',
+                onPressed: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Log out?'),
+                      content: const Text(
+                        'You will need to sign in again to place orders.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Cancel'),
                         ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                user?.name ?? 'Guest',
-                                style: AppTextStyles.title,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                user?.email ?? '',
-                                style: AppTextStyles.caption,
-                              ),
-                              if (user?.phone.isNotEmpty == true) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  user!.phone,
-                                  style: AppTextStyles.caption,
-                                ),
-                              ],
-                              if (user != null) ...[
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Role: ${user.role}',
-                                  style: AppTextStyles.caption,
-                                ),
-                                if (user.joinedDate.isNotEmpty)
-                                  Text(
-                                    'Joined: ${user.joinedDate.length >= 10 ? user.joinedDate.substring(0, 10) : user.joinedDate}',
-                                    style: AppTextStyles.caption,
-                                  ),
-                                Text(
-                                  'Orders: ${user.orderCount} · Spent: ${MoneyFormat.format(user.totalPurchases)}',
-                                  style: AppTextStyles.caption,
-                                ),
-                              ],
-                            ],
-                          ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Log out'),
                         ),
                       ],
                     ),
-            ),
-            const SizedBox(height: 20),
-            Text('Nearby lockers', style: AppTextStyles.title),
-            const SizedBox(height: 10),
-            lockersAsync.when(
-              loading: () => const SoftPanel(
-                child: Center(child: CircularProgressIndicator()),
-              ),
-              error: (_, _) => SoftPanel(
-                child: Text(
-                  'Unable to load lockers',
-                  style: AppTextStyles.body.copyWith(color: AppColors.muted),
-                ),
-              ),
-              data: (names) {
-                if (names.isEmpty) {
-                  return SoftPanel(
-                    child: Text(
-                      'No lockers nearby yet',
-                      style: AppTextStyles.body.copyWith(color: AppColors.muted),
-                    ),
                   );
-                }
-                return Column(
-                  children: names
-                      .map(
-                        (location) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: SoftPanel(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.place_outlined,
-                                  color: AppColors.primary,
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(location, style: AppTextStyles.body),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                );
-              },
-            ),
-            const SizedBox(height: 12),
-            _ProfileTile(
-              icon: Icons.settings_outlined,
-              label: 'Settings',
-              onTap: () => context.push('/settings'),
-            ),
-            _ProfileTile(
-              icon: Icons.help_outline_rounded,
-              label: 'Help',
-              onTap: () => context.push('/help'),
-            ),
-            if (auth.isAdmin)
-              _ProfileTile(
-                icon: Icons.admin_panel_settings_outlined,
-                label: 'Admin Portal',
-                onTap: () => context.push('/admin/dashboard'),
+                  if (confirmed != true || !context.mounted) return;
+                  await ref.read(authSessionProvider.notifier).logout();
+                  if (context.mounted) context.go('/login');
+                },
               ),
-            const SizedBox(height: 8),
-            SecondaryButton(
-              label: 'Logout',
-              onPressed: () async {
-                final confirmed = await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Log out?'),
-                    content: const Text(
-                      'You will need to sign in again to place orders.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel'),
-                      ),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text('Log out'),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirmed != true || !context.mounted) return;
-                await ref.read(authSessionProvider.notifier).logout();
-                if (context.mounted) context.go('/login');
-              },
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
-
-final _nearbyLockerNamesProvider = FutureProvider<List<String>>((ref) async {
-  if (!ref.watch(authSessionProvider).isAuthenticated) return const [];
-  final lockers = await ref.read(lockerRepositoryProvider).list();
-  return lockers.take(5).map((l) => l.name).toList();
-});
 
 class _ProfileTile extends StatelessWidget {
   const _ProfileTile({
@@ -216,13 +160,29 @@ class _ProfileTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: SoftPanel(
-        padding: EdgeInsets.zero,
-        child: ListTile(
-          leading: Icon(icon, color: AppColors.primary),
-          title: Text(label, style: AppTextStyles.body),
-          trailing: const Icon(Icons.chevron_right_rounded),
+      child: Material(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
           onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            child: Row(
+              children: [
+                Icon(icon, color: AppColors.primary, size: 22),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(label, style: AppTextStyles.body),
+                ),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppColors.muted,
+                  size: 22,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

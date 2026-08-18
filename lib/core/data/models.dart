@@ -167,6 +167,22 @@ class CartLine {
   }
 }
 
+/// One purchasable line on an order (customer display).
+class OrderLineItem {
+  const OrderLineItem({
+    required this.name,
+    this.quantity = 1,
+    this.imageUrl = '',
+    this.boxLabel = '',
+  });
+
+  final String name;
+  final int quantity;
+  final String imageUrl;
+  /// Human box label when known (e.g. "3").
+  final String boxLabel;
+}
+
 class OrderSummary {
   const OrderSummary({
     required this.id,
@@ -181,6 +197,7 @@ class OrderSummary {
     this.collectionToken = '',
     this.itemImages = const [],
     this.itemNames = const [],
+    this.lines = const [],
     this.mongoId = '',
     this.rawStatus = '',
     this.customerName = '',
@@ -205,6 +222,8 @@ class OrderSummary {
   final String collectionToken;
   final List<String> itemImages;
   final List<String> itemNames;
+  /// Line items with quantities for Order Details.
+  final List<OrderLineItem> lines;
   /// Mongo ObjectId when available (for admin cancel/delete APIs).
   final String mongoId;
   /// Backend enum status (e.g. READY_FOR_COLLECTION).
@@ -329,7 +348,8 @@ class InventoryRow {
   /// UI label — never invents a catalog Item named "Empty Box".
   String get displayName => isEmpty ? 'Empty Box' : name;
 
-  bool get isOccupied => !isEmpty && quantity > 0;
+  /// True when the physical box has an assigned stock row.
+  bool get isOccupied => !isEmpty;
 }
 
 class BoxInventorySummary {

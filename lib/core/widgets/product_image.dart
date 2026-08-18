@@ -23,7 +23,7 @@ class ProductImage extends ConsumerWidget {
     this.borderRadius = 14,
     this.icon = Icons.shopping_bag_outlined,
     this.iconSize = 36,
-    this.fit = BoxFit.cover,
+    this.fit = BoxFit.contain,
   });
 
   final String? imageUrl;
@@ -48,61 +48,62 @@ class ProductImage extends ConsumerWidget {
       );
     }
 
+    // ClipRRect only rounds the container; BoxFit.contain keeps the full
+    // image visible (letterboxing allowed — never crop/zoom/stretch).
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
-      child: CachedNetworkImage(
-        imageUrl: url,
-        height: height,
-        width: width,
-        fit: fit,
-        memCacheWidth:
-            width != null && width!.isFinite ? (width! * 2).round() : 600,
-        fadeInDuration: const Duration(milliseconds: 120),
-        placeholder: (_, _) => Container(
+      child: ColoredBox(
+        color: AppColors.surfaceMuted,
+        child: CachedNetworkImage(
+          imageUrl: url,
           height: height,
           width: width,
-          color: AppColors.surfaceMuted,
-          child: const Center(
-            child: SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          ),
-        ),
-        errorWidget: (_, failedUrl, error) {
-          ProductImageUrlRules.debugLogLoadFailure(failedUrl, error);
-          final compact = (height ?? 0) > 0 && (height ?? 0) < 72;
-          return Container(
+          fit: fit,
+          alignment: Alignment.center,
+          memCacheWidth:
+              width != null && width!.isFinite ? (width! * 2).round() : 600,
+          fadeInDuration: const Duration(milliseconds: 120),
+          placeholder: (_, _) => SizedBox(
             height: height,
             width: width,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceMuted,
-              borderRadius: BorderRadius.circular(borderRadius),
+            child: const Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  icon,
-                  size: compact ? iconSize * 0.7 : iconSize,
-                  color: AppColors.warmGray,
-                ),
-                if (!compact) ...[
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Image unavailable',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppColors.warmGray,
-                      fontWeight: FontWeight.w500,
-                    ),
+          ),
+          errorWidget: (_, failedUrl, error) {
+            ProductImageUrlRules.debugLogLoadFailure(failedUrl, error);
+            final compact = (height ?? 0) > 0 && (height ?? 0) < 72;
+            return SizedBox(
+              height: height,
+              width: width,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon,
+                    size: compact ? iconSize * 0.7 : iconSize,
+                    color: AppColors.warmGray,
                   ),
+                  if (!compact) ...[
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Image unavailable',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.warmGray,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ],
-              ],
-            ),
-          );
-        },
+              ),
+            );
+          },
+        ),
       ),
     );
   }

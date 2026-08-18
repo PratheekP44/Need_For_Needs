@@ -82,7 +82,6 @@ class _HtmlFileDropZoneState extends State<_HtmlFileDropZone> {
         prevent(e);
         widget.onDragLeave?.call();
         final dt = e.dataTransfer;
-        if (dt == null) return;
         final files = dt.files;
         if (files == null || files.isEmpty) return;
         final file = files.first;

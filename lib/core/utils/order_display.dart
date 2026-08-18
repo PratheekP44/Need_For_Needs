@@ -83,14 +83,50 @@ String friendlyPaymentLabel(String paymentStatus) {
 }
 
 /// Soften order status for customers.
+///
+/// Prefers backend enums (`READY_FOR_COLLECTION`) when passed; also accepts
+/// already-mapped labels (`Ready to collect`).
 String friendlyOrderStatus(String status) {
-  final s = status.trim();
-  if (s.isEmpty) return 'Unknown';
-  final lower = s.toLowerCase();
+  final raw = status.trim();
+  if (raw.isEmpty) return 'Unknown';
+
+  final enumKey = raw.toUpperCase().replaceAll(' ', '_');
+  switch (enumKey) {
+    case 'READY_FOR_COLLECTION':
+    case 'READY_TO_COLLECT':
+      return 'Ready for collection';
+    case 'WAITING_PAYMENT':
+    case 'CREATED':
+    case 'AWAITING_PAYMENT':
+      return 'Awaiting payment';
+    case 'PAYMENT_SUCCESS':
+    case 'PAID':
+      return 'Paid';
+    case 'COLLECTED':
+      return 'Collected';
+    case 'CANCELLED':
+    case 'CANCELED':
+      return 'Cancelled';
+    case 'EXPIRED':
+      return 'Expired';
+  }
+
+  final lower = raw.toLowerCase();
   if (lower.contains('ready')) return 'Ready for collection';
-  if (lower.contains('collect') && !lower.contains('ready')) return 'Collected';
+  if (lower.contains('collect') && !lower.contains('ready')) {
+    return 'Collected';
+  }
   if (lower.contains('expir')) return 'Expired';
   if (lower.contains('cancel')) return 'Cancelled';
   if (lower.contains('paid') || lower.contains('confirm')) return 'Paid';
-  return s;
+  if (lower.contains('await') || lower.contains('waiting')) {
+    return 'Awaiting payment';
+  }
+  return raw;
+}
+
+/// Zero-padded box label for Collect UI (`3` → `03`).
+String formatBoxLabel(int boxNumber) {
+  if (boxNumber < 0) return '$boxNumber';
+  return boxNumber.toString().padLeft(2, '0');
 }

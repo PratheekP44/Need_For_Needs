@@ -262,7 +262,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: RouteNames.adminInventoryAssign,
         builder: (context, state) {
           final itemId = state.uri.queryParameters['itemId'];
-          return AdminAssignStockScreen(initialItemId: itemId);
+          final lockerId = state.uri.queryParameters['lockerId'];
+          return AdminAssignStockScreen(
+            initialItemId: itemId,
+            lockerId: lockerId,
+          );
         },
       ),
       GoRoute(
