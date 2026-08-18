@@ -55,9 +55,10 @@ class BleResponseObservation {
 
     if (copy.isNotEmpty) {
       b0 = copy[0];
-      // User-supplied candidate only — not an invented protocol table.
       if (b0 == 0x02) {
-        b0Note = 'Command Response (user-supplied candidate)';
+        b0Note = 'Command Response (confirmed)';
+      } else if (b0 == 0x04) {
+        b0Note = 'Error (confirmed type only; no sub-error map)';
       } else {
         b0Note = 'unknown (no mapping)';
       }
@@ -65,17 +66,17 @@ class BleResponseObservation {
     if (copy.length >= 2) {
       b1 = copy[1];
       if (b1 == 1) {
-        pendingNote = 'YES (user-supplied candidate)';
+        pendingNote = 'YES (confirmed)';
       } else if (b1 == 0) {
-        pendingNote = 'NO / DONE (user-supplied candidate)';
+        pendingNote = 'NO / DONE (confirmed)';
       } else {
         pendingNote = 'unknown (no mapping)';
       }
     }
     if (copy.length >= 5) {
       b4 = copy[4];
-      if (b4 == 0x04) {
-        lockerNote = 'OPEN / UNLOCKED (user-supplied candidate)';
+      if (b4 == 0xA1) {
+        lockerNote = 'UNLOCKED candidate when complete (confirmed 0xA1)';
       } else {
         lockerNote = 'unknown (no mapping)';
       }

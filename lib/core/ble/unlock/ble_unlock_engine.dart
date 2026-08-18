@@ -7,6 +7,7 @@ import '../managers/timeout_manager.dart';
 import '../models/ble_device.dart';
 import '../protocol/ble_response_observation.dart';
 import '../protocol/final_unlock_packet_builder.dart';
+import '../protocol/final_unlock_response_parser.dart';
 import '../protocol/packet_parser.dart';
 import '../protocol/packet_types.dart';
 import '../protocol/parsed_ble_response.dart';
@@ -406,7 +407,8 @@ class BleUnlockEngine {
   /// Packet Port / Box / Terminal must already be set from the order
   /// ([CollectUnlockInfo.toUnlockPacketRequest]) — never hardcoded here.
   ///
-  /// Connect (by device name) → OPEN 32-byte packet → wait notify → disconnect.
+  /// Connect → one FINAL 32-byte OPEN write → wait for N MCU completions
+  /// (N = unique boxes on the current order) → disconnect.
   Future<UnlockResult> unlockOpen(
     UnlockPacketRequest request, {
     String targetDeviceName = defaultTargetName,
@@ -427,28 +429,29 @@ class BleUnlockEngine {
       );
 
       onStage?.call('open');
-      // Phase 32 — Collect sends FINAL packet (Command 0x01 + current-order Port).
       final packet = buildCollectPacket(request);
       BleLog.d('[BleUnlockEngine] Packet HEX ${_hex(packet)}');
-      openParsed = await writeAndWait(packet: packet, timing: timing);
 
+      final expected = _expectedUnlockCommands(request);
       BleLog.d(
-        '[BleUnlockEngine] Notification HEX=${openParsed.rawHex} '
-        'kind=${openParsed.kind.name} msg=${openParsed.message}',
+        '[BleUnlockEngine] Phase 44B expected unlock completions=$expected '
+        'boxes=${request.effectiveBoxNumbers}',
       );
 
-      final success = _isUnlockSuccess(openParsed);
-      BleLog.d(
-        '[BleUnlockEngine] Unlock Result success=$success '
-        'kind=${openParsed.kind.name}',
+      final multi = await _writeAndCollectFinalUnlockResponses(
+        packet: packet,
+        expectedCommands: expected,
+        timing: timing,
       );
-      if (!success) {
+      openParsed = multi.lastParsed;
+
+      if (!multi.success) {
         timing.mark('UNLOCK_FAIL');
-        timing.report(success: false, note: openParsed.message);
+        timing.report(success: false, note: multi.message);
         await disconnect();
         return UnlockResult.fail(
-          stage: 'open',
-          message: openParsed.message ?? 'Unlock failed',
+          stage: multi.stage,
+          message: multi.message,
           openResponse: openParsed,
         );
       }
@@ -503,6 +506,142 @@ class BleUnlockEngine {
     }
   }
 
+  /// Unique boxes on the current order — expected completed MCU unlocks.
+  static int _expectedUnlockCommands(UnlockPacketRequest request) {
+    final n = request.effectiveBoxNumbers.toSet().length;
+    return n < 1 ? 1 : n;
+  }
+
+  /// One TX write, then consume notifications until N successes or failure.
+  Future<({
+    bool success,
+    String stage,
+    String message,
+    ParsedBleResponse? lastParsed,
+  })> _writeAndCollectFinalUnlockResponses({
+    required Uint8List packet,
+    required int expectedCommands,
+    CollectBleProfiler? timing,
+  }) async {
+    if (!isConnected) {
+      throw StateError('Write failed — not connected');
+    }
+
+    final wire = Uint8List.fromList(packet);
+    final wait =
+        _timeouts.responseTimeout(BlePacketType.openBox);
+    final tracker = FinalUnlockResponseTracker(
+      expectedCommands: expectedCommands,
+    );
+
+    final firstWait = connection.waitForNotification(timeout: wait);
+    try {
+      timing?.mark('WRITE_START');
+      BleLog.d('[Phase31] WRITE_START');
+      await connection.writePacket(wire);
+      timing?.mark('WRITE_COMPLETE');
+      BleLog.d('[Phase31] WRITE_COMPLETE');
+      BleLog.d('[BleUnlockEngine] Write success');
+    } catch (e) {
+      BleLog.e('[BleUnlockEngine] Write failed', e);
+      unawaited(firstWait.then<void>((_) {}, onError: (_) {}));
+      throw StateError('Write failed: $e');
+    }
+
+    ParsedBleResponse? lastParsed;
+    var raw = await firstWait;
+    timing?.mark('RESPONSE_RECEIVED');
+
+    while (true) {
+      _collectResponseSeq += 1;
+      BleResponseObservation.inspect(
+        raw,
+        sequence: _collectResponseSeq,
+      ).log();
+
+      final mcu = FinalUnlockResponseParser.parse(raw);
+      final step = tracker.apply(mcu);
+      lastParsed = _toParsedBleResponse(mcu);
+
+      BleLog.d(
+        '[BleUnlockEngine] 44B notify=#${step.notificationIndex} '
+        'action=${step.action.name} '
+        'successCmds=${step.successfulCommands}/${step.expectedCommands}',
+      );
+
+      switch (step.action) {
+        case FinalUnlockTrackAction.continueWaiting:
+        case FinalUnlockTrackAction.progress:
+          raw = await connection.waitForNotification(timeout: wait);
+          timing?.mark('RESPONSE_RECEIVED');
+          continue;
+        case FinalUnlockTrackAction.allSucceeded:
+          return (
+            success: true,
+            stage: 'complete',
+            message: 'Locker Opened Successfully',
+            lastParsed: lastParsed,
+          );
+        case FinalUnlockTrackAction.failed:
+          final idx = step.failedNotificationIndex ?? step.notificationIndex;
+          final msg = mcu.isError
+              ? 'Locker couldn\'t be opened. (command error at response #$idx)'
+              : mcu.isInvalid
+                  ? 'Locker couldn\'t be opened. (invalid response)'
+                  : 'Locker couldn\'t be opened.';
+          BleLog.e(
+            '[BleUnlockEngine] COMMAND ERROR / FAIL at response #$idx '
+            'HEX=${mcu.rawHex} successful=${step.successfulCommands}/'
+            '${step.expectedCommands}',
+          );
+          return (
+            success: false,
+            stage: 'open',
+            message: msg,
+            lastParsed: lastParsed,
+          );
+      }
+    }
+  }
+
+  static ParsedBleResponse _toParsedBleResponse(FinalUnlockParsedResponse mcu) {
+    if (mcu.isSuccess) {
+      return ParsedBleResponse(
+        kind: BleResponseKind.unlockSuccess,
+        raw: mcu.raw,
+        rawHex: mcu.rawHex,
+        opened: true,
+        doorState: 'OPEN',
+        message: 'Unlock Success',
+      );
+    }
+    if (mcu.isPending) {
+      return ParsedBleResponse(
+        kind: BleResponseKind.ack,
+        raw: mcu.raw,
+        rawHex: mcu.rawHex,
+        opened: false,
+        message: 'Command pending',
+      );
+    }
+    if (mcu.isError) {
+      return ParsedBleResponse(
+        kind: BleResponseKind.error,
+        raw: mcu.raw,
+        rawHex: mcu.rawHex,
+        opened: false,
+        message: 'COMMAND ERROR',
+      );
+    }
+    return ParsedBleResponse(
+      kind: BleResponseKind.unknown,
+      raw: mcu.raw,
+      rawHex: mcu.rawHex,
+      opened: false,
+      message: mcu.isInvalid ? 'Invalid response' : 'Unknown response',
+    );
+  }
+
   static void _logUnlockRequest(UnlockPacketRequest request) {
     BleLog.d('── BleUnlockEngine.unlockOpen (Phase 32 FINAL packet) ──');
     BleLog.d('Order ID: ${request.orderId}');
@@ -513,20 +652,6 @@ class BleUnlockEngine {
     BleLog.d('Item ID: ${request.itemId ?? ''}');
     BleLog.d('Transaction ID: ${request.transactionId}');
     BleLog.d('──────────────────────────────────────────────');
-  }
-
-  static bool _isUnlockSuccess(ParsedBleResponse parsed) {
-    if (parsed.kind == BleResponseKind.unlockSuccess ||
-        parsed.kind == BleResponseKind.ack ||
-        parsed.opened == true) {
-      return true;
-    }
-    // Firmware may return a short/unknown status; treat non-NACK as OK
-    // once a notify arrives after a valid 32-byte OPEN write (Demo-proven).
-    return parsed.kind != BleResponseKind.nack &&
-        parsed.kind != BleResponseKind.unlockFailure &&
-        parsed.kind != BleResponseKind.error &&
-        parsed.kind != BleResponseKind.authRejected;
   }
 
   static String _friendlyTimeout(String msg) {

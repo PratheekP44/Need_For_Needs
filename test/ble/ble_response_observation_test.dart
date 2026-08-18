@@ -37,13 +37,13 @@ void main() {
       expect(obs.remainingAfterIndex4, isEmpty);
     });
 
-    test('five-byte response exposes locker state candidate', () {
+    test('five-byte response exposes locker state candidate for 0xA1', () {
       final obs = BleResponseObservation.inspect(
-        Uint8List.fromList([0x02, 0x00, 0x00, 0x00, 0x04]),
+        Uint8List.fromList([0x02, 0x00, 0x00, 0x00, 0xA1]),
       );
       expect(obs.length, 5);
-      expect(obs.byte4, 0x04);
-      expect(obs.lockerStateCandidateNote, contains('OPEN'));
+      expect(obs.byte4, 0xA1);
+      expect(obs.lockerStateCandidateNote, contains('UNLOCKED'));
       expect(obs.remainingAfterIndex4, isEmpty);
     });
 
@@ -56,15 +56,15 @@ void main() {
       expect(obs.pendingCandidateNote, contains('YES'));
     });
 
-    test('pending DONE and open candidate when [1]=0 [4]=0x04', () {
+    test('pending DONE and unlocked candidate when [1]=0 [4]=0xA1', () {
       final obs = BleResponseObservation.inspect(
-        Uint8List.fromList([0x02, 0x00, 0xAA, 0xBB, 0x04]),
+        Uint8List.fromList([0x02, 0x00, 0xAA, 0xBB, 0xA1]),
       );
       expect(obs.byte0, 0x02);
       expect(obs.byte1, 0);
       expect(obs.pendingCandidateNote, contains('DONE'));
-      expect(obs.byte4, 0x04);
-      expect(obs.lockerStateCandidateNote, contains('OPEN'));
+      expect(obs.byte4, 0xA1);
+      expect(obs.lockerStateCandidateNote, contains('UNLOCKED'));
     });
 
     test('unknown byte 0 stays unknown', () {
@@ -91,14 +91,14 @@ void main() {
 
     test('long response preserves remaining bytes without meaning', () {
       final raw = Uint8List.fromList([
-        0x02, 0x00, 0x11, 0x22, 0x04, 0xAB, 0xCD, 0xEF,
+        0x02, 0x00, 0x11, 0x22, 0xA1, 0xAB, 0xCD, 0xEF,
       ]);
       final obs = BleResponseObservation.inspect(raw, sequence: 2);
       expect(obs.sequence, 2);
       expect(obs.length, 8);
       expect(obs.remainingAfterIndex4, [0xAB, 0xCD, 0xEF]);
-      expect(obs.bytesDec, [0x02, 0x00, 0x11, 0x22, 0x04, 0xAB, 0xCD, 0xEF]);
-      expect(obs.bytesHex, '02 00 11 22 04 ab cd ef');
+      expect(obs.bytesDec, [0x02, 0x00, 0x11, 0x22, 0xA1, 0xAB, 0xCD, 0xEF]);
+      expect(obs.bytesHex, '02 00 11 22 a1 ab cd ef');
     });
 
     test('raw bytes preserved exactly', () {
@@ -109,7 +109,7 @@ void main() {
     });
 
     test('does not mutate original buffer', () {
-      final raw = Uint8List.fromList([0x02, 0x00, 0x00, 0x00, 0x04]);
+      final raw = Uint8List.fromList([0x02, 0x00, 0x00, 0x00, 0xA1]);
       final before = List<int>.from(raw);
       final obs = BleResponseObservation.inspect(raw);
       expect(List<int>.from(raw), before);

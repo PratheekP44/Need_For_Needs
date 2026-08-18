@@ -35,6 +35,7 @@ export 'protocol/parsed_ble_response.dart';
 export 'protocol/real_packet_builder.dart';
 export 'protocol/final_unlock_port.dart';
 export 'protocol/final_unlock_packet_builder.dart';
+export 'protocol/final_unlock_response_parser.dart';
 export 'providers/ble_providers.dart';
 export 'transport/ble_link_state.dart';
 export 'transport/ble_log.dart';
