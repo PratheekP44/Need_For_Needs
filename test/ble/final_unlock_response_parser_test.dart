@@ -203,12 +203,13 @@ void main() {
       expect(t.successfulCommands, 5);
     });
 
-    test('invalid short response fails tracker', () {
+    test('invalid short response continues waiting (not MCU error)', () {
       final t = FinalUnlockResponseTracker(expectedCommands: 1);
       final step = t.apply(
         FinalUnlockResponseParser.parse(_rx([0x02])),
       );
-      expect(step.action, FinalUnlockTrackAction.failed);
+      expect(step.action, FinalUnlockTrackAction.continueWaiting);
+      expect(t.errorCount, 0);
       expect(t.successfulCommands, 0);
     });
   });

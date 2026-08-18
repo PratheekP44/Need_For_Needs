@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import '../transport/ble_log.dart';
 
-/// Confirmed FinalUnlock / LKRM RX response kinds (Phase 44B).
+/// Confirmed FinalUnlock / LKRM RX response kinds (Phase 44B / 44B-FIX).
 ///
 /// Values from live capture + user-confirmed firmware behavior only.
 enum FinalUnlockRxType {
@@ -64,10 +64,19 @@ class FinalUnlockParsedResponse {
       commandState == FinalUnlockRxCommandState.complete &&
       result == FinalUnlockRxResult.unlocked;
 
+  /// ONLY explicit MCU error: [0] == 0x04.
+  /// A [0] == 0x02 response is NEVER an error (pending, complete, or otherwise).
   bool get isError =>
-      validLength && type == FinalUnlockRxType.error;
+      validLength &&
+      byte0 == FinalUnlockResponseParser.typeError &&
+      type == FinalUnlockRxType.error;
 
   bool get isInvalid => !validLength;
+
+  /// Command-response ([0]==0x02) that is not yet a counted success.
+  /// Includes pending and non-A1 complete — keep waiting, never error.
+  bool get isCommandResponseNonError =>
+      validLength && byte0 == FinalUnlockResponseParser.typeCommandResponse;
 
   bool get isUnknown =>
       validLength &&
@@ -75,7 +84,7 @@ class FinalUnlockParsedResponse {
       !isSuccess &&
       !isError;
 
-  void logDeveloper({int? notificationIndex, int? commandSuccessCount}) {
+  void logDeveloper({int? notificationIndex, int? commandSuccessCount, int? errorCount}) {
     final n = notificationIndex ?? 0;
     BleLog.d('── COLLECT RESPONSE #$n (Phase 44B) ──');
     BleLog.d('Length: $length');
@@ -86,8 +95,12 @@ class FinalUnlockParsedResponse {
     BleLog.d('Type: ${_typeLabel()}');
     BleLog.d('State: ${_stateLabel()}');
     BleLog.d('Result: ${_resultLabel()}');
+    BleLog.d('isError: $isError (only true when [0]==0x04)');
     if (commandSuccessCount != null) {
       BleLog.d('Successful commands so far: $commandSuccessCount');
+    }
+    if (errorCount != null) {
+      BleLog.d('Error count so far: $errorCount');
     }
     BleLog.d('── end COLLECT RESPONSE #$n ──');
   }
@@ -195,7 +208,7 @@ class FinalUnlockResponseParser {
       result = FinalUnlockRxResult.unlocked;
     } else if (type == FinalUnlockRxType.commandResponse &&
         commandState == FinalUnlockRxCommandState.complete) {
-      // Complete but not 0xA1 — unknown (not success).
+      // Complete but not 0xA1 — keep waiting; NOT an MCU error.
       result = FinalUnlockRxResult.unknown;
     } else {
       result = FinalUnlockRxResult.unknown;
@@ -218,16 +231,16 @@ class FinalUnlockResponseParser {
 
 /// Aggregates notifications for one Collect attempt (one TX, N unlocks).
 enum FinalUnlockTrackAction {
-  /// Keep waiting for another notification (pending).
+  /// Keep waiting for another notification (pending / non-error incomplete).
   continueWaiting,
 
   /// One unlock command completed; still need more.
   progress,
 
-  /// All expected unlock commands completed.
+  /// All expected unlock commands completed and errorCount == 0.
   allSucceeded,
 
-  /// Hard failure (error / invalid / unknown / complete-without-A1).
+  /// Hard failure: ONLY an MCU [0]==0x04 error (or explicit invalid empty).
   failed,
 }
 
@@ -237,6 +250,7 @@ class FinalUnlockTrackStep {
     required this.parsed,
     required this.successfulCommands,
     required this.expectedCommands,
+    required this.errorCount,
     required this.notificationIndex,
     this.failedNotificationIndex,
   });
@@ -245,66 +259,126 @@ class FinalUnlockTrackStep {
   final FinalUnlockParsedResponse parsed;
   final int successfulCommands;
   final int expectedCommands;
+  final int errorCount;
   final int notificationIndex;
   final int? failedNotificationIndex;
+
+  bool get isOverallSuccess =>
+      action == FinalUnlockTrackAction.allSucceeded &&
+      successfulCommands >= expectedCommands &&
+      errorCount == 0;
 }
 
-/// Counts completed unlocks; pending never increments success.
+/// Counts completed unlocks; pending / non-error 0x02 never increments errors.
 class FinalUnlockResponseTracker {
   FinalUnlockResponseTracker({required this.expectedCommands})
       : assert(expectedCommands >= 1);
 
   final int expectedCommands;
   int successfulCommands = 0;
+  int errorCount = 0;
   int notificationIndex = 0;
   int? failedNotificationIndex;
-  bool get isComplete => successfulCommands >= expectedCommands;
+
+  bool get isOverallSuccess =>
+      successfulCommands >= expectedCommands && errorCount == 0;
 
   FinalUnlockTrackStep apply(FinalUnlockParsedResponse parsed) {
     notificationIndex += 1;
     parsed.logDeveloper(
       notificationIndex: notificationIndex,
       commandSuccessCount: successfulCommands,
+      errorCount: errorCount,
     );
 
-    if (parsed.isPending) {
+    // ── FIRST: [0] == 0x04 → MCU ERROR only ──
+    if (parsed.isError) {
+      errorCount += 1;
+      failedNotificationIndex = notificationIndex;
+      BleLog.e(
+        '[FinalUnlockTracker] COMMAND ERROR [0]==0x04 '
+        'at response #$notificationIndex HEX=${parsed.rawHex}',
+      );
+      return FinalUnlockTrackStep(
+        action: FinalUnlockTrackAction.failed,
+        parsed: parsed,
+        successfulCommands: successfulCommands,
+        expectedCommands: expectedCommands,
+        errorCount: errorCount,
+        notificationIndex: notificationIndex,
+        failedNotificationIndex: failedNotificationIndex,
+      );
+    }
+
+    // ── [0] == 0x02 → NEVER an error ──
+    if (parsed.isCommandResponseNonError ||
+        parsed.byte0 == FinalUnlockResponseParser.typeCommandResponse) {
+      if (parsed.isPending) {
+        return FinalUnlockTrackStep(
+          action: FinalUnlockTrackAction.continueWaiting,
+          parsed: parsed,
+          successfulCommands: successfulCommands,
+          expectedCommands: expectedCommands,
+          errorCount: errorCount,
+          notificationIndex: notificationIndex,
+        );
+      }
+
+      if (parsed.isSuccess) {
+        successfulCommands += 1;
+        BleLog.d(
+          '[FinalUnlockTracker] unlock complete '
+          '$successfulCommands/$expectedCommands errors=$errorCount',
+        );
+        if (isOverallSuccess) {
+          return FinalUnlockTrackStep(
+            action: FinalUnlockTrackAction.allSucceeded,
+            parsed: parsed,
+            successfulCommands: successfulCommands,
+            expectedCommands: expectedCommands,
+            errorCount: errorCount,
+            notificationIndex: notificationIndex,
+          );
+        }
+        return FinalUnlockTrackStep(
+          action: FinalUnlockTrackAction.progress,
+          parsed: parsed,
+          successfulCommands: successfulCommands,
+          expectedCommands: expectedCommands,
+          errorCount: errorCount,
+          notificationIndex: notificationIndex,
+        );
+      }
+
+      // [0]==0x02 but not yet counted success (e.g. complete without A1,
+      // unknown [1]). Keep waiting — MUST NOT become Try Again / failed.
+      BleLog.d(
+        '[FinalUnlockTracker] [0]==0x02 non-final — continue waiting '
+        '(not an error) HEX=${parsed.rawHex}',
+      );
       return FinalUnlockTrackStep(
         action: FinalUnlockTrackAction.continueWaiting,
         parsed: parsed,
         successfulCommands: successfulCommands,
         expectedCommands: expectedCommands,
+        errorCount: errorCount,
         notificationIndex: notificationIndex,
       );
     }
 
-    if (parsed.isSuccess) {
-      successfulCommands += 1;
-      if (successfulCommands >= expectedCommands) {
-        return FinalUnlockTrackStep(
-          action: FinalUnlockTrackAction.allSucceeded,
-          parsed: parsed,
-          successfulCommands: successfulCommands,
-          expectedCommands: expectedCommands,
-          notificationIndex: notificationIndex,
-        );
-      }
-      return FinalUnlockTrackStep(
-        action: FinalUnlockTrackAction.progress,
-        parsed: parsed,
-        successfulCommands: successfulCommands,
-        expectedCommands: expectedCommands,
-        notificationIndex: notificationIndex,
-      );
-    }
-
-    failedNotificationIndex = notificationIndex;
+    // Other non-0x04 bytes (and short frames): keep waiting; not MCU error.
+    // Legitimate timeout elsewhere ends the attempt if responses never arrive.
+    BleLog.d(
+      '[FinalUnlockTracker] non-error unrecognized notify — continue waiting '
+      'HEX=${parsed.rawHex}',
+    );
     return FinalUnlockTrackStep(
-      action: FinalUnlockTrackAction.failed,
+      action: FinalUnlockTrackAction.continueWaiting,
       parsed: parsed,
       successfulCommands: successfulCommands,
       expectedCommands: expectedCommands,
+      errorCount: errorCount,
       notificationIndex: notificationIndex,
-      failedNotificationIndex: failedNotificationIndex,
     );
   }
 }

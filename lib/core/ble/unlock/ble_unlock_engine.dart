@@ -471,7 +471,12 @@ class BleUnlockEngine {
         mtu: linked.mtu,
         openResponse: openParsed,
       );
-      await disconnect();
+      // Disconnect after success must not rewrite UnlockResult to failure.
+      try {
+        await disconnect();
+      } catch (e) {
+        BleLog.d('[BleUnlockEngine] Disconnect after success ignored: $e');
+      }
       return result;
     } on TimeoutException catch (e) {
       timing.mark('UNLOCK_FAIL');
@@ -566,7 +571,8 @@ class BleUnlockEngine {
       BleLog.d(
         '[BleUnlockEngine] 44B notify=#${step.notificationIndex} '
         'action=${step.action.name} '
-        'successCmds=${step.successfulCommands}/${step.expectedCommands}',
+        'successCmds=${step.successfulCommands}/${step.expectedCommands} '
+        'errors=${step.errorCount}',
       );
 
       switch (step.action) {
@@ -583,21 +589,18 @@ class BleUnlockEngine {
             lastParsed: lastParsed,
           );
         case FinalUnlockTrackAction.failed:
+          // Only reached for MCU [0]==0x04 (see tracker).
           final idx = step.failedNotificationIndex ?? step.notificationIndex;
-          final msg = mcu.isError
-              ? 'Locker couldn\'t be opened. (command error at response #$idx)'
-              : mcu.isInvalid
-                  ? 'Locker couldn\'t be opened. (invalid response)'
-                  : 'Locker couldn\'t be opened.';
           BleLog.e(
-            '[BleUnlockEngine] COMMAND ERROR / FAIL at response #$idx '
+            '[BleUnlockEngine] MCU ERROR [0]==0x04 at response #$idx '
             'HEX=${mcu.rawHex} successful=${step.successfulCommands}/'
-            '${step.expectedCommands}',
+            '${step.expectedCommands} errors=${step.errorCount}',
           );
           return (
             success: false,
             stage: 'open',
-            message: msg,
+            message:
+                'Locker couldn\'t be opened. (command error at response #$idx)',
             lastParsed: lastParsed,
           );
       }
